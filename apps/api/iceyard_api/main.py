@@ -15,6 +15,7 @@ from iceyard_api.auth.service import AuthService
 from iceyard_api.core.config import get_settings
 from iceyard_api.core.logging import configure_logging
 from iceyard_api.db.base import Base
+from iceyard_api.db.schema_sync import reconcile_schema
 from iceyard_api.db.session import SessionLocal, engine
 
 settings = get_settings()
@@ -25,6 +26,7 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(bind=engine)
+    reconcile_schema(engine)
     with SessionLocal() as session:
         default_admin = AuthService(session, settings).ensure_default_admin()
         session.commit()
