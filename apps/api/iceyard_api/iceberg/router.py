@@ -110,7 +110,11 @@ def list_refs(
     return IcebergIndexService(session).list_refs(table_id)
 
 
-@router.get("/{table_id}/schema", response_model=list[SchemaVersionRead])
+@router.get(
+    "/{table_id}/schema",
+    response_model=list[SchemaVersionRead],
+    response_model_by_alias=False,
+)
 def list_schema_versions(
     table_id: str,
     session: Session = Depends(get_session),

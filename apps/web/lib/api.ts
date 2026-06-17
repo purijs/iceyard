@@ -82,6 +82,8 @@ export const api = {
   me: (token: string) => request<UserRead>("/api/v1/auth/me", {}, token),
   changePassword: (token: string, body: { current_password: string; new_password: string }) =>
     request<{ status: string }>("/api/v1/auth/password", { method: "POST", body: JSON.stringify(body) }, token),
+  logout: (token: string) =>
+    request<{ status: string }>("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({}) }, token),
   users: (token: string) => request<UserDetailRead[]>("/api/v1/users", {}, token),
   roles: (token: string) => request<RoleRead[]>("/api/v1/roles", {}, token),
   createUser: (token: string, body: { username: string; password: string; role_ids: string[] }) =>

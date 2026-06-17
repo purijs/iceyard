@@ -313,7 +313,7 @@ function TableDetail({
   }, [previewResource, tab, table.id, token]);
 
   const latestSchema = detail.schemas.at(-1);
-  const schemaFields = asRecords(latestSchema?.table_schema.fields);
+  const schemaFields = asRecords(latestSchema?.table_schema?.fields);
   const currentPartition = detail.partitions.find((partition) => partition.is_current) ?? detail.partitions[0];
   const currentSort = detail.sortOrders.find((sortOrder) => sortOrder.is_current) ?? detail.sortOrders[0];
   const operationIds = new Set(operations.map((operation) => operation.id));

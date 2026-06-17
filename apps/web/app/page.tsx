@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, Database, GitBranch, LayoutDashboard, ListChecks, Search, Shield, Sparkles, Table2, TerminalSquare, Users2, Wrench } from "lucide-react";
+import { Boxes, Database, GitBranch, LayoutDashboard, ListChecks, LogOut, Search, Shield, Sparkles, Table2, TerminalSquare, Users2, Wrench } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui";
@@ -127,6 +127,18 @@ export default function Home() {
     setOpenOperationId(operationId);
     setView("operations");
   };
+  const handleLogout = async () => {
+    try {
+      if (token) await api.logout(token);
+    } catch {
+      // Ignore logout errors; clear the local session regardless.
+    }
+    localStorage.removeItem("iceyard_token");
+    setToken(null);
+    setUser(null);
+    setSelectedTable(null);
+    setView("overview");
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-50 text-zinc-950">
@@ -156,9 +168,19 @@ export default function Home() {
           ))}
         </nav>
         <div className="border-t border-zinc-200 p-3">
-          <div className="rounded-md bg-zinc-50 px-3 py-2 text-xs">
-            <div className="font-medium text-zinc-800">{user?.username ?? "User"}</div>
-            <div className="text-zinc-400">signed in</div>
+          <div className="flex items-center justify-between gap-2 rounded-md bg-zinc-50 px-3 py-2 text-xs">
+            <div className="min-w-0">
+              <div className="truncate font-medium text-zinc-800">{user?.username ?? "User"}</div>
+              <div className="text-zinc-400">signed in</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Sign out"
+              className="flex shrink-0 items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              <LogOut size={14} /> Sign out
+            </button>
           </div>
         </div>
       </aside>
