@@ -15,6 +15,13 @@ class EnvironmentCreate(BaseModel):
     posture: dict[str, object] = Field(default_factory=dict)
 
 
+class EnvironmentUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    kind: str | None = Field(default=None, max_length=40)
+    region: str | None = Field(default=None, max_length=80)
+    posture: dict[str, object] | None = None
+
+
 class EnvironmentRead(EnvironmentCreate):
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,6 +38,17 @@ class CatalogConnectionCreate(BaseModel):
     warehouse: str | None = None
     auth_ref: str | None = None
     settings: dict[str, object] = Field(default_factory=dict)
+
+
+class CatalogConnectionUpdate(BaseModel):
+    environment_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    catalog_type: CatalogType | None = None
+    endpoint: str | None = None
+    warehouse: str | None = None
+    auth_ref: str | None = None
+    settings: dict[str, object] | None = None
+    is_enabled: bool | None = None
 
 
 class CatalogConnectionRead(CatalogConnectionCreate):
@@ -61,6 +79,16 @@ class ObjectStoreConnectionCreate(BaseModel):
     settings: dict[str, object] = Field(default_factory=dict)
 
 
+class ObjectStoreConnectionUpdate(BaseModel):
+    environment_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    store_type: StoreType | None = None
+    endpoint: str | None = None
+    region: str | None = None
+    auth_ref: str | None = None
+    settings: dict[str, object] | None = None
+
+
 class ObjectStoreConnectionRead(ObjectStoreConnectionCreate):
     model_config = ConfigDict(from_attributes=True)
 
@@ -76,10 +104,40 @@ class ComputeBackendCreate(BaseModel):
     settings: dict[str, object] = Field(default_factory=dict)
 
 
+class ComputeBackendUpdate(BaseModel):
+    environment_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    backend_type: ComputeType | None = None
+    settings: dict[str, object] | None = None
+    is_enabled: bool | None = None
+
+
 class ComputeBackendRead(ComputeBackendCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     workspace_id: str
     is_enabled: bool
+    created_at: datetime
+
+
+class SecretReferenceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider: str = Field(min_length=1, max_length=80)
+    reference: str = Field(min_length=1, max_length=500)
+
+
+class SecretReferenceUpdate(BaseModel):
+    provider: str | None = Field(default=None, min_length=1, max_length=80)
+    reference: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+class SecretReferenceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    name: str
+    provider: str
+    has_reference: bool
     created_at: datetime

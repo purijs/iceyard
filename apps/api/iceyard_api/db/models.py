@@ -138,6 +138,10 @@ class SecretReference(Base):
     reference: Mapped[str] = mapped_column(String(500), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+    @property
+    def has_reference(self) -> bool:
+        return bool(self.reference)
+
 
 class CatalogConnection(Base):
     __tablename__ = "catalog_connection"
