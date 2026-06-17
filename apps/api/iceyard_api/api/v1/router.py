@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from iceyard_api.advisor.router import router as advisor_router
 from iceyard_api.approvals.router import router as approvals_router
 from iceyard_api.audit.router import router as audit_router
 from iceyard_api.auth.router import router as auth_router
@@ -28,6 +29,7 @@ router.include_router(operations_router)
 router.include_router(layout_router)
 router.include_router(tuning_router)
 router.include_router(retention_router)
+router.include_router(advisor_router)
 router.include_router(policies_router)
 router.include_router(jobs_router)
 router.include_router(approvals_router)

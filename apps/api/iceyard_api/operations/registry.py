@@ -1707,6 +1707,34 @@ RAW_OPERATIONS: list[dict[str, object]] = [
         gates=["dry_run_required", "affected_row_estimate", "restore_point_required"],
         restore_point_required=True,
     ),
+    op(
+        "create_summary_table",
+        "Create summary table",
+        "Tuning",
+        "WRITE",
+        E_SQL,
+        "CREATE TABLE {catalog}.{namespace}.{summary_name} USING iceberg AS\n{definition}",
+        description="Self-managed materialized-view fallback: a precomputed aggregate table.",
+        params=[
+            param("namespace", default="{ns}"),
+            param("summary_name", required=True, placeholder="events_daily_region"),
+            param(
+                "definition",
+                required=True,
+                placeholder="SELECT day, region, count(*) FROM events GROUP BY 1, 2",
+            ),
+        ],
+    ),
+    op(
+        "refresh_summary_table",
+        "Refresh summary table",
+        "Tuning",
+        "REWRITE",
+        ["spark", "trino", "embedded"],
+        "INSERT OVERWRITE {table}\n{definition}",
+        description="Recompute a self-managed summary/aggregate table.",
+        params=[param("definition", required=True, placeholder="SELECT ... GROUP BY ...")],
+    ),
 ]
 
 OPERATIONS = [OperationDescriptor.model_validate(item) for item in RAW_OPERATIONS]
