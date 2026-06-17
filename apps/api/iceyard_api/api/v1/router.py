@@ -9,10 +9,12 @@ from iceyard_api.iceberg.router import router as iceberg_router
 from iceyard_api.jobs.router import router as jobs_router
 from iceyard_api.operations.router import router as operations_router
 from iceyard_api.rbac.router import router as rbac_router
+from iceyard_api.tenants.router import router as tenants_router
 from iceyard_api.users.router import router as users_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
+router.include_router(tenants_router)
 router.include_router(users_router)
 router.include_router(rbac_router)
 router.include_router(connections_router)

@@ -16,6 +16,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
     "platform_admin": ["*"],
     "workspace_admin": [
         "workspace.read",
+        "workspace.manage",
         "users.manage",
         "roles.manage",
         "connections.manage",
