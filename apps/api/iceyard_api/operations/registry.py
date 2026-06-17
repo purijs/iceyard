@@ -17,6 +17,8 @@ CATEGORY_ORDER = [
     "Branch and tag",
     "Snapshots",
     "Maintenance",
+    "Tuning",
+    "Retention",
     "Stats and CDC",
     "Migration",
     "Views",
@@ -1615,6 +1617,53 @@ RAW_OPERATIONS: list[dict[str, object]] = [
         ["snowflake"],
         "ALTER ICEBERG TABLE {table} REFRESH",
         description="Refresh a managed Iceberg table in an external engine.",
+    ),
+    op(
+        "set_parquet_settings",
+        "Set Parquet write settings",
+        "Tuning",
+        "METADATA",
+        E_SQL,
+        (
+            "ALTER TABLE {table} SET TBLPROPERTIES ("
+            "'write.parquet.compression-codec' = '{codec}', "
+            "'write.parquet.compression-level' = '{compression_level}', "
+            "'write.parquet.row-group-size-bytes' = '{row_group_size_bytes}')"
+        ),
+        description="Tune Parquet codec, level, and row-group size for future writes.",
+        params=[
+            param(
+                "codec",
+                "enum",
+                default="zstd",
+                options=["zstd", "snappy", "gzip", "lz4", "uncompressed"],
+            ),
+            param("compression_level", "integer", default=3),
+            param("row_group_size_bytes", "integer", default=134_217_728, advanced=True),
+        ],
+    ),
+    op(
+        "rewrite_parquet_encoding",
+        "Re-encode Parquet files",
+        "Tuning",
+        "REWRITE",
+        E_MAINTENANCE,
+        (
+            "CALL system.rewrite_data_files(table => '{table}', "
+            "options => map('target-file-size-bytes','{target_file_size_bytes}'))"
+        ),
+        description="Rewrite existing data files with the current Parquet settings.",
+        params=[param("target_file_size_bytes", "integer", default=536_870_912)],
+    ),
+    op(
+        "set_write_distribution",
+        "Set write distribution mode",
+        "Tuning",
+        "METADATA",
+        E_SQL,
+        "ALTER TABLE {table} SET TBLPROPERTIES ('write.distribution-mode' = '{mode}')",
+        description="Control pre-write shuffle to reduce small-file creation at the source.",
+        params=[param("mode", "enum", default="hash", options=["none", "hash", "range"])],
     ),
 ]
 
