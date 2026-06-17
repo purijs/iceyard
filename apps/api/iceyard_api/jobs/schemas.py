@@ -11,6 +11,7 @@ class JobRead(BaseModel):
     operation_request_id: str | None
     kind: str
     status: str
+    correlation_id: str | None
     created_by: str | None
     created_at: datetime
     updated_at: datetime

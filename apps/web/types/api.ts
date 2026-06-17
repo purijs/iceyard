@@ -194,6 +194,7 @@ export type JobRead = {
   operation_request_id: string | null;
   kind: string;
   status: string;
+  correlation_id: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

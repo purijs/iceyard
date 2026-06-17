@@ -33,11 +33,25 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set("content-type", "application/json");
   if (token) {
     headers.set("authorization", `Bearer ${token}`);
+  }
+  // Double-submit CSRF token for cookie-authenticated, state-changing requests.
+  const method = (options.method ?? "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    const csrf = readCookie("iceyard_csrf");
+    if (csrf) {
+      headers.set("x-csrf-token", csrf);
+    }
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,

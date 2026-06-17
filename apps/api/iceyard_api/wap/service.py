@@ -3,6 +3,7 @@ from datetime import UTC
 from sqlalchemy.orm import Session
 
 from iceyard_api.audit.service import AuditService
+from iceyard_api.core.logging import current_correlation_id
 from iceyard_api.core.time import utcnow
 from iceyard_api.db.models import IcebergTable, Job, JobLog, JobRun, User
 from iceyard_api.layout.service import LayoutStatsService
@@ -39,6 +40,7 @@ class WapService:
             kind="wap",
             status="running",
             created_by=actor.id,
+            correlation_id=current_correlation_id(),
         )
         self.session.add(job)
         self.session.flush()

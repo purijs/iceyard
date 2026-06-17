@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from iceyard_api.audit.service import AuditService
+from iceyard_api.core.logging import current_correlation_id
 from iceyard_api.db.models import (
     ApprovalRequest,
     IcebergTable,
@@ -242,6 +243,7 @@ class OperationService:
             kind="oneoff",
             status="queued",
             created_by=actor.id,
+            correlation_id=current_correlation_id(),
         )
         self.session.add(job)
         self.session.flush()

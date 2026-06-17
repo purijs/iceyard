@@ -30,6 +30,12 @@ def _redact_processor(
     return redact(event_dict)
 
 
+def current_correlation_id() -> str | None:
+    """The request/correlation id bound for the active request, if any."""
+    value = structlog.contextvars.get_contextvars().get("request_id")
+    return value if isinstance(value, str) else None
+
+
 def configure_logging(level: str) -> None:
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO), format="%(message)s")
     structlog.configure(

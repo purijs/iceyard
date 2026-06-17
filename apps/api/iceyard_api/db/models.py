@@ -354,6 +354,7 @@ class Job(Base):
     )
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_by: Mapped[str | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
