@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: iceyard
+      POSTGRES_USER: iceyard
+      POSTGRES_PASSWORD: iceyard
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/api.Dockerfile
+    environment:
+      ICEYARD_ENVIRONMENT: local
+      ICEYARD_DATABASE_URL: postgresql+psycopg://iceyard:iceyard@postgres:5432/iceyard
+      ICEYARD_CORS_ORIGINS: '["http://localhost:3000"]'
+      ICEYARD_LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/web.Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
