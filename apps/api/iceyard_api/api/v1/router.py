@@ -7,7 +7,9 @@ from iceyard_api.connections.router import router as connections_router
 from iceyard_api.health.router import router as health_router
 from iceyard_api.iceberg.router import router as iceberg_router
 from iceyard_api.jobs.router import router as jobs_router
+from iceyard_api.layout.router import router as layout_router
 from iceyard_api.operations.router import router as operations_router
+from iceyard_api.policies.router import router as policies_router
 from iceyard_api.rbac.router import router as rbac_router
 from iceyard_api.tenants.router import router as tenants_router
 from iceyard_api.users.router import router as users_router
@@ -21,6 +23,8 @@ router.include_router(connections_router)
 router.include_router(iceberg_router)
 router.include_router(health_router)
 router.include_router(operations_router)
+router.include_router(layout_router)
+router.include_router(policies_router)
 router.include_router(jobs_router)
 router.include_router(approvals_router)
 router.include_router(audit_router)
