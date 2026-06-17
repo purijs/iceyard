@@ -35,6 +35,17 @@ class TableRead(BaseModel):
     metrics: TableMetricsRead | None = None
 
 
+class TableIndexRefreshRequest(BaseModel):
+    catalog_connection_id: str | None = None
+
+
+class TableIndexRefreshResult(BaseModel):
+    catalog_connection_id: str | None
+    namespace_count: int
+    table_count: int
+    refreshed_at: datetime
+
+
 class SnapshotRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -73,5 +84,26 @@ class NamespaceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    workspace_id: str
     catalog_connection_id: str
     name: str
+
+
+class PartitionSpecRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    table_id: str
+    spec_id: int
+    spec: dict[str, Any]
+    is_current: bool
+
+
+class SortOrderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    table_id: str
+    order_id: int
+    fields: list[dict[str, Any]]
+    is_current: bool

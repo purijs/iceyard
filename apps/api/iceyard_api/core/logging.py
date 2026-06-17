@@ -1,5 +1,6 @@
 import logging
 from collections.abc import MutableMapping
+from datetime import date, datetime
 from typing import Any
 
 import structlog
@@ -18,6 +19,8 @@ def redact(value: Any) -> Any:
         return redacted
     if isinstance(value, list):
         return [redact(item) for item in value]
+    if isinstance(value, date | datetime):
+        return value.isoformat()
     return value
 
 

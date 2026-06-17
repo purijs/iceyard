@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -117,18 +118,25 @@ class IcebergIndexService:
             envs[env_name] = env
         catalogs: dict[str, CatalogConnection] = {}
         for env_name, env in envs.items():
-            catalog = CatalogConnection(
-                workspace_id=workspace_id,
-                environment_id=env.id,
-                name=f"{env_name}-catalog",
-                catalog_type="jdbc",
-                endpoint=f"jdbc:postgresql://{env_name}-postgres:5432/iceberg_catalog",
-                warehouse=f"s3://{env_name}-lakehouse",
-                settings={},
-                capabilities=capabilities_for_catalog("jdbc"),
+            catalog = self.session.scalar(
+                select(CatalogConnection).where(
+                    CatalogConnection.workspace_id == workspace_id,
+                    CatalogConnection.name == f"{env_name}-catalog",
+                )
             )
-            self.session.add(catalog)
-            self.session.flush()
+            if not catalog:
+                catalog = CatalogConnection(
+                    workspace_id=workspace_id,
+                    environment_id=env.id,
+                    name=f"{env_name}-catalog",
+                    catalog_type="jdbc",
+                    endpoint=f"jdbc:postgresql://{env_name}-postgres:5432/iceberg_catalog",
+                    warehouse=f"s3://{env_name}-lakehouse",
+                    settings={},
+                    capabilities=capabilities_for_catalog("jdbc"),
+                )
+                self.session.add(catalog)
+                self.session.flush()
             catalogs[env_name] = catalog
         namespaces: dict[tuple[str, str], Namespace] = {}
         for env_name, namespace_name, *_ in TABLE_FIXTURES:
@@ -266,13 +274,77 @@ class IcebergIndexService:
         self.session.flush()
         self.session.commit()
 
-    def list_tables(self, workspace_id: str) -> list[IcebergTable]:
+    def refresh_index(
+        self, workspace_id: str, catalog_connection_id: str | None = None
+    ) -> dict[str, object]:
+        if catalog_connection_id:
+            catalog = self.session.scalar(
+                select(CatalogConnection).where(
+                    CatalogConnection.workspace_id == workspace_id,
+                    CatalogConnection.id == catalog_connection_id,
+                )
+            )
+            if not catalog:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Catalog connection not found."
+                )
         self.ensure_mock_data(workspace_id)
+        refreshed_at = utcnow()
+        table_stmt = select(IcebergTable).where(IcebergTable.workspace_id == workspace_id)
+        if catalog_connection_id:
+            table_stmt = (
+                table_stmt.join(Namespace)
+                .where(Namespace.catalog_connection_id == catalog_connection_id)
+            )
+        tables = list(self.session.scalars(table_stmt))
+        for table in tables:
+            table.indexed_at = refreshed_at
+        namespace_stmt = select(func.count(Namespace.id)).where(
+            Namespace.workspace_id == workspace_id
+        )
+        if catalog_connection_id:
+            namespace_stmt = namespace_stmt.where(
+                Namespace.catalog_connection_id == catalog_connection_id
+            )
+        self.session.flush()
+        return {
+            "catalog_connection_id": catalog_connection_id,
+            "namespace_count": int(self.session.scalar(namespace_stmt) or 0),
+            "table_count": len(tables),
+            "refreshed_at": refreshed_at,
+        }
+
+    def list_namespaces(
+        self, workspace_id: str, catalog_connection_id: str | None = None
+    ) -> list[Namespace]:
+        self.ensure_mock_data(workspace_id)
+        stmt = select(Namespace).where(Namespace.workspace_id == workspace_id)
+        if catalog_connection_id:
+            stmt = stmt.where(Namespace.catalog_connection_id == catalog_connection_id)
+        return list(self.session.scalars(stmt.order_by(Namespace.name.asc())))
+
+    def list_tables(
+        self,
+        workspace_id: str,
+        *,
+        environment_id: str | None = None,
+        namespace_id: str | None = None,
+        min_health: int | None = None,
+        max_health: int | None = None,
+    ) -> list[IcebergTable]:
+        self.ensure_mock_data(workspace_id)
+        stmt = select(IcebergTable).where(IcebergTable.workspace_id == workspace_id)
+        if environment_id:
+            stmt = stmt.where(IcebergTable.environment_id == environment_id)
+        if namespace_id:
+            stmt = stmt.where(IcebergTable.namespace_id == namespace_id)
+        if min_health is not None:
+            stmt = stmt.where(IcebergTable.health_score >= min_health)
+        if max_health is not None:
+            stmt = stmt.where(IcebergTable.health_score <= max_health)
         return list(
             self.session.scalars(
-                select(IcebergTable)
-                .where(IcebergTable.workspace_id == workspace_id)
-                .order_by(IcebergTable.health_score.asc(), IcebergTable.name.asc())
+                stmt.order_by(IcebergTable.health_score.asc(), IcebergTable.name.asc())
             )
         )
 
@@ -303,5 +375,23 @@ class IcebergIndexService:
                 select(SchemaVersion)
                 .where(SchemaVersion.table_id == table_id)
                 .order_by(SchemaVersion.schema_id)
+            )
+        )
+
+    def list_partition_specs(self, table_id: str) -> list[PartitionSpec]:
+        return list(
+            self.session.scalars(
+                select(PartitionSpec)
+                .where(PartitionSpec.table_id == table_id)
+                .order_by(PartitionSpec.spec_id)
+            )
+        )
+
+    def list_sort_orders(self, table_id: str) -> list[SortOrder]:
+        return list(
+            self.session.scalars(
+                select(SortOrder)
+                .where(SortOrder.table_id == table_id)
+                .order_by(SortOrder.order_id)
             )
         )

@@ -10,6 +10,26 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
     assert table_rows
     risky_table = table_rows[0]
 
+    refresh = client.post("/api/v1/tables/index/refresh", json={}, headers=headers)
+    assert refresh.status_code == 200, refresh.text
+    assert refresh.json()["table_count"] >= len(table_rows)
+
+    namespaces = client.get("/api/v1/tables/namespaces", headers=headers)
+    assert namespaces.status_code == 200
+    assert {namespace["name"] for namespace in namespaces.json()} >= {"analytics", "sales"}
+
+    filtered = client.get("/api/v1/tables?max_health=55", headers=headers)
+    assert filtered.status_code == 200
+    assert all(table["health_score"] <= 55 for table in filtered.json())
+
+    partitions = client.get(f"/api/v1/tables/{risky_table['id']}/partitions", headers=headers)
+    assert partitions.status_code == 200
+    assert partitions.json()[0]["is_current"] is True
+
+    sort_orders = client.get(f"/api/v1/tables/{risky_table['id']}/sort-orders", headers=headers)
+    assert sort_orders.status_code == 200
+    assert sort_orders.json()[0]["fields"]
+
     dashboard = client.get("/api/v1/dashboard", headers=headers)
     assert dashboard.status_code == 200
     assert dashboard.json()["table_count"] >= len(table_rows)
