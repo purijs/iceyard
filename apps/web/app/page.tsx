@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, Database, LayoutDashboard, ListChecks, Search, Shield, Table2, TerminalSquare } from "lucide-react";
+import { Boxes, Database, LayoutDashboard, ListChecks, Search, Shield, Table2, TerminalSquare, Users2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui";
@@ -11,6 +11,7 @@ import { Jobs } from "@/features/jobs/Jobs";
 import { Operations } from "@/features/operations/Operations";
 import { AuthGate } from "@/features/settings/AuthGate";
 import { Tables } from "@/features/tables/Tables";
+import { Users } from "@/features/users/Users";
 import { api } from "@/lib/api";
 import type {
   AuditEventRead,
@@ -20,7 +21,9 @@ import type {
   HealthRead,
   JobRead,
   OperationDescriptor,
+  RoleRead,
   TableRead,
+  UserDetailRead,
   UserRead
 } from "@/types/api";
 
@@ -30,6 +33,7 @@ const NAV = [
   ["tables", "Tables", Table2],
   ["operations", "Operations", TerminalSquare],
   ["jobs", "Jobs", ListChecks],
+  ["users", "Users", Users2],
   ["governance", "Governance", Shield]
 ] as const;
 
@@ -46,6 +50,8 @@ export default function Home() {
   const [operations, setOperations] = useState<OperationDescriptor[]>([]);
   const [openOperationId, setOpenOperationId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobRead[]>([]);
+  const [users, setUsers] = useState<UserDetailRead[]>([]);
+  const [roles, setRoles] = useState<RoleRead[]>([]);
   const [audit, setAudit] = useState<AuditEventRead[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentRead[]>([]);
   const [connections, setConnections] = useState<CatalogConnectionRead[]>([]);
@@ -57,19 +63,23 @@ export default function Home() {
       try {
         const me = await api.me(activeToken);
         const tableRows = await api.tables(activeToken);
-        const [dash, operationRows, jobRows, auditRows, envRows, connectionRows] = await Promise.all([
+        const [dash, operationRows, jobRows, auditRows, envRows, connectionRows, userRows, roleRows] = await Promise.all([
           api.dashboard(activeToken),
           api.operations(activeToken),
           api.jobs(activeToken),
           api.audit(activeToken),
           api.environments(activeToken),
-          api.connections(activeToken)
+          api.connections(activeToken),
+          api.users(activeToken),
+          api.roles(activeToken)
         ]);
         setUser(me);
         setDashboard(dash);
         setTables(tableRows);
         setOperations(operationRows);
         setJobs(jobRows);
+        setUsers(userRows);
+        setRoles(roleRows);
         setAudit(auditRows);
         setEnvironments(envRows);
         setConnections(connectionRows);
@@ -136,8 +146,8 @@ export default function Home() {
         </nav>
         <div className="border-t border-zinc-200 p-3">
           <div className="rounded-md bg-zinc-50 px-3 py-2 text-xs">
-            <div className="font-medium text-zinc-800">{user?.display_name ?? "User"}</div>
-            <div className="text-zinc-400">{user?.email}</div>
+            <div className="font-medium text-zinc-800">{user?.username ?? "User"}</div>
+            <div className="text-zinc-400">signed in</div>
           </div>
         </div>
       </aside>
@@ -181,6 +191,9 @@ export default function Home() {
             />
           ) : null}
           {view === "jobs" ? <Jobs jobs={jobs} /> : null}
+          {view === "users" ? (
+            <Users token={token} users={users} roles={roles} currentUserId={user?.id ?? null} onRefresh={() => load(token)} />
+          ) : null}
           {view === "governance" ? <Governance audit={audit} /> : null}
         </main>
       </div>

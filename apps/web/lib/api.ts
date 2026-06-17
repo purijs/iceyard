@@ -10,8 +10,10 @@ import type {
   OperationDescriptor,
   OperationDryRunRead,
   OperationExecuteRead,
+  RoleRead,
   TableRead,
   TokenResponse,
+  UserDetailRead,
   UserRead
 } from "@/types/api";
 
@@ -44,9 +46,17 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 export const api = {
   bootstrap: (body: { workspace_name: string; email: string; password: string; display_name: string }) =>
     request<BootstrapResponse>("/api/v1/auth/bootstrap", { method: "POST", body: JSON.stringify(body) }),
-  login: (body: { email: string; password: string }) =>
+  login: (body: { username: string; password: string }) =>
     request<TokenResponse>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: (token: string) => request<UserRead>("/api/v1/auth/me", {}, token),
+  changePassword: (token: string, body: { current_password: string; new_password: string }) =>
+    request<{ status: string }>("/api/v1/auth/password", { method: "POST", body: JSON.stringify(body) }, token),
+  users: (token: string) => request<UserDetailRead[]>("/api/v1/users", {}, token),
+  roles: (token: string) => request<RoleRead[]>("/api/v1/roles", {}, token),
+  createUser: (token: string, body: { username: string; password: string; role_ids: string[] }) =>
+    request<UserDetailRead>("/api/v1/users", { method: "POST", body: JSON.stringify(body) }, token),
+  updateUser: (token: string, userId: string, body: { role_ids?: string[]; is_active?: boolean }) =>
+    request<UserDetailRead>(`/api/v1/users/${userId}`, { method: "PATCH", body: JSON.stringify(body) }, token),
   dashboard: (token: string) => request<DashboardRead>("/api/v1/dashboard", {}, token),
   tables: (token: string) => request<TableRead[]>("/api/v1/tables", {}, token),
   tableHealth: (token: string, tableId: string) => request<HealthRead>(`/api/v1/tables/${tableId}/health`, {}, token),

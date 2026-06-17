@@ -8,10 +8,11 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from iceyard_api.api.v1.router import router as api_router
+from iceyard_api.auth.service import AuthService
 from iceyard_api.core.config import get_settings
 from iceyard_api.core.logging import configure_logging
 from iceyard_api.db.base import Base
-from iceyard_api.db.session import engine
+from iceyard_api.db.session import SessionLocal, engine
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -21,6 +22,11 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    with SessionLocal() as session:
+        default_admin = AuthService(session, settings).ensure_default_admin()
+        session.commit()
+        if default_admin:
+            logger.info("auth.default_admin.ready", username=default_admin.username)
     yield
 
 

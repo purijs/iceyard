@@ -7,6 +7,7 @@ from iceyard_api.auth.schemas import (
     BootstrapRequest,
     BootstrapResponse,
     LoginRequest,
+    PasswordChangeRequest,
     TokenResponse,
     UserRead,
 )
@@ -44,7 +45,7 @@ def bootstrap(
         resource_id=workspace.id,
         workspace_id=workspace.id,
         actor_id=user.id,
-        after_state={"workspace": workspace.name, "user": user.email},
+        after_state={"workspace": workspace.name, "username": user.username},
     )
     session.commit()
     set_session_cookie(response, raw_token, settings)
@@ -63,7 +64,8 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> TokenResponse:
     service = AuthService(session, settings)
-    user = service.authenticate(payload.email, payload.password)
+    service.ensure_default_admin()
+    user = service.authenticate(payload.username_value, payload.password)
     raw_token, session_token = service.create_session(user)
     AuditService(session).record(
         action="auth.login",
@@ -75,6 +77,27 @@ def login(
     session.commit()
     set_session_cookie(response, raw_token, settings)
     return TokenResponse(access_token=raw_token, expires_at=session_token.expires_at)
+
+
+@router.post("/password")
+def change_password(
+    payload: PasswordChangeRequest,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    AuthService(session, settings).change_password(
+        current_user, payload.current_password, payload.new_password
+    )
+    AuditService(session).record(
+        action="auth.password.change",
+        resource_type="user",
+        resource_id=current_user.id,
+        workspace_id=current_user.workspace_id,
+        actor_id=current_user.id,
+    )
+    session.commit()
+    return {"status": "ok"}
 
 
 @router.post("/logout")

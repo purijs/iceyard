@@ -1,6 +1,7 @@
 export type UserRead = {
   id: string;
   workspace_id: string;
+  username: string;
   email: string;
   display_name: string;
   is_active: boolean;
@@ -151,4 +152,15 @@ export type AuditEventRead = {
   actor_id: string | null;
   occurred_at: string;
   event_metadata: Record<string, unknown>;
+};
+
+export type RoleRead = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  permissions: Array<{ id: string; action: string; resource_selector: Record<string, unknown> }>;
+};
+
+export type UserDetailRead = UserRead & {
+  roles: Array<{ id: string; name: string }>;
 };

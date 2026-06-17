@@ -46,6 +46,10 @@ class User(Base):
     workspace: Mapped[Workspace] = relationship()
     roles: Mapped[list["Role"]] = relationship(secondary="user_role", back_populates="users")
 
+    @property
+    def username(self) -> str:
+        return self.email
+
 
 class Role(Base):
     __tablename__ = "role"

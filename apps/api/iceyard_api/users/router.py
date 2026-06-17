@@ -28,14 +28,14 @@ def create_user(
     session: Session = Depends(get_session),
     current_user: User = Depends(require_permission("users.manage")),
 ) -> UserDetailRead:
-    email = payload.email.lower()
-    existing = session.scalar(select(User).where(User.email == email))
+    username = payload.username.lower()
+    existing = session.scalar(select(User).where(User.email == username))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists.")
     user = User(
         workspace_id=current_user.workspace_id,
-        email=email,
-        display_name=payload.display_name,
+        email=username,
+        display_name=username,
         password_hash=hash_password(payload.password),
         is_service_account=payload.is_service_account,
     )
@@ -49,8 +49,7 @@ def create_user(
         workspace_id=current_user.workspace_id,
         actor_id=current_user.id,
         after_state={
-            "email": user.email,
-            "display_name": user.display_name,
+            "username": user.username,
             "roles": [role.name for role in user.roles],
             "is_service_account": user.is_service_account,
         },
@@ -80,12 +79,19 @@ def update_user(
     service = RbacService(session)
     user = service.get_user(current_user.workspace_id, user_id)
     before_state = {
-        "display_name": user.display_name,
+        "username": user.username,
         "is_active": user.is_active,
         "roles": [role.name for role in user.roles],
     }
-    if payload.display_name is not None:
-        user.display_name = payload.display_name
+    if payload.username is not None:
+        username = payload.username.lower()
+        existing = session.scalar(select(User).where(User.email == username, User.id != user.id))
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="User already exists."
+            )
+        user.email = username
+        user.display_name = username
     if payload.is_active is not None:
         if user.id == current_user.id and payload.is_active is False:
             raise HTTPException(
@@ -104,7 +110,7 @@ def update_user(
         actor_id=current_user.id,
         before_state=before_state,
         after_state={
-            "display_name": user.display_name,
+            "username": user.username,
             "is_active": user.is_active,
             "roles": [role.name for role in user.roles],
         },

@@ -4,15 +4,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UserCreate(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    display_name: str = Field(min_length=1, max_length=200)
-    password: str = Field(min_length=12, max_length=256)
+    username: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=4, max_length=256)
     role_ids: list[str] = Field(default_factory=list)
     is_service_account: bool = False
 
 
 class UserUpdate(BaseModel):
-    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    username: str | None = Field(default=None, min_length=3, max_length=320)
     is_active: bool | None = None
     role_ids: list[str] | None = None
 
@@ -29,6 +28,7 @@ class UserDetailRead(BaseModel):
 
     id: str
     workspace_id: str
+    username: str
     email: str
     display_name: str
     is_active: bool

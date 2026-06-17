@@ -24,13 +24,8 @@ def client() -> Generator[TestClient, None, None]:
 @pytest.fixture()
 def token(client: TestClient) -> str:
     response = client.post(
-        "/api/v1/auth/bootstrap",
-        json={
-            "workspace_name": "Iceyard",
-            "email": "admin@example.com",
-            "password": "change-this-password",
-            "display_name": "Platform Admin",
-        },
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "admin"},
     )
     assert response.status_code == 200, response.text
-    return str(response.json()["token"]["access_token"])
+    return str(response.json()["access_token"])
