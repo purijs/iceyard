@@ -16,6 +16,7 @@ from iceyard_api.retention.router import router as retention_router
 from iceyard_api.tenants.router import router as tenants_router
 from iceyard_api.tuning.router import router as tuning_router
 from iceyard_api.users.router import router as users_router
+from iceyard_api.wap.router import router as wap_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -30,6 +31,7 @@ router.include_router(layout_router)
 router.include_router(tuning_router)
 router.include_router(retention_router)
 router.include_router(advisor_router)
+router.include_router(wap_router)
 router.include_router(policies_router)
 router.include_router(jobs_router)
 router.include_router(approvals_router)
