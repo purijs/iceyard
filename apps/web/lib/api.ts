@@ -1,10 +1,15 @@
 import type {
   AuditEventRead,
+  AutomationPolicy,
   BootstrapResponse,
   CatalogConnectionRead,
+  CleanupPreview,
+  ClusteringAdvice,
   DashboardRead,
+  DistributionAdvice,
   EnvironmentRead,
   HealthRead,
+  ParquetAdvice,
   JobLogRead,
   JobRead,
   JobRunRead,
@@ -47,6 +52,9 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
       message = response.statusText;
     }
     throw new Error(message);
+  }
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return undefined as T;
   }
   return (await response.json()) as T;
 }
@@ -134,5 +142,26 @@ export const api = {
   jobLogs: (token: string, jobId: string) => request<JobLogRead[]>(`/api/v1/jobs/${jobId}/logs`, {}, token),
   cancelJob: (token: string, jobId: string) =>
     request<JobRead>(`/api/v1/jobs/${jobId}/cancel`, { method: "POST", body: JSON.stringify({}) }, token),
-  audit: (token: string) => request<AuditEventRead[]>("/api/v1/audit", {}, token)
+  audit: (token: string) => request<AuditEventRead[]>("/api/v1/audit", {}, token),
+  policies: (token: string) => request<AutomationPolicy[]>("/api/v1/policies", {}, token),
+  createPolicy: (token: string, body: Record<string, unknown>) =>
+    request<AutomationPolicy>("/api/v1/policies", { method: "POST", body: JSON.stringify(body) }, token),
+  deletePolicy: (token: string, policyId: string) =>
+    request<void>(`/api/v1/policies/${policyId}`, { method: "DELETE" }, token),
+  clusteringAdvice: (token: string, tableId: string, body: Record<string, unknown>) =>
+    request<ClusteringAdvice>(
+      `/api/v1/tables/${tableId}/clustering-advice`,
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    ),
+  parquetAdvice: (token: string, tableId: string) =>
+    request<ParquetAdvice>(`/api/v1/tables/${tableId}/parquet-advice`, {}, token),
+  distributionAdvice: (token: string, tableId: string) =>
+    request<DistributionAdvice>(`/api/v1/tables/${tableId}/distribution-advice`, {}, token),
+  cleanupPreview: (token: string, tableId: string, body: Record<string, unknown>) =>
+    request<CleanupPreview>(
+      `/api/v1/tables/${tableId}/cleanup/preview`,
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    )
 };

@@ -210,7 +210,7 @@ export default function Home() {
             <Users token={token} users={users} roles={roles} currentUserId={user?.id ?? null} onRefresh={() => load(token)} />
           ) : null}
           {view === "governance" ? <Governance audit={audit} /> : null}
-          {view === "automation" ? <Automation tables={tables} operations={operations} onOpenOperation={openOperation} /> : null}
+          {view === "automation" ? <Automation token={token} tables={tables} operations={operations} onOpenOperation={openOperation} /> : null}
         </main>
       </div>
     </div>

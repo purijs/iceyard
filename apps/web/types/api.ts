@@ -241,3 +241,79 @@ export type RoleRead = {
 export type UserDetailRead = UserRead & {
   roles: Array<{ id: string; name: string }>;
 };
+
+export type AutomationPolicy = {
+  id: string;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  selector: Record<string, unknown>;
+  trigger: Record<string, unknown>;
+  action: { op: string; params: Record<string, unknown> };
+  guardrails: Record<string, unknown>;
+  alerting: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClusteringRecommendation = {
+  strategy: "sort" | "zorder";
+  columns: string[];
+  sort_order_expr: string;
+  current_clustering_depth: number;
+  projected_clustering_depth: number;
+  projected_scan_reduction_pct: number;
+  apply_operation_id: string;
+  apply_params: Record<string, unknown>;
+  rationale: string;
+};
+
+export type ClusteringAdvice = {
+  table_id: string;
+  table_name: string;
+  workload_basis: string;
+  recommendations: ClusteringRecommendation[];
+  note: string;
+};
+
+export type ParquetAdvice = {
+  table_id: string;
+  table_name: string;
+  current_codec: string;
+  recommended_codec: string;
+  recommended_level: number;
+  dictionary_enabled: boolean;
+  row_group_size_bytes: number;
+  apply_operation_id: string;
+  rationale: string;
+  note: string;
+};
+
+export type DistributionAdvice = {
+  table_id: string;
+  table_name: string;
+  current_mode: string;
+  recommended_mode: string;
+  apply_operation_id: string;
+  projected_small_file_reduction_pct: number;
+  ingestion_hint: string;
+  rationale: string;
+  note: string;
+};
+
+export type CleanupPreview = {
+  table_id: string;
+  table_name: string;
+  cutoff: string;
+  partition_aligned: boolean;
+  estimated_delete_pct: number;
+  estimated_rows_removed: number;
+  estimated_bytes_reclaimed: number;
+  guardrail_max_delete_pct: number;
+  guardrail_passed: boolean;
+  mode: string;
+  plan: Array<{ name: string; detail: string }>;
+  apply_operation_id: string;
+  recommend_partitioning: boolean;
+  note: string;
+};
