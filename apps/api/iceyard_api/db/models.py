@@ -414,3 +414,31 @@ class RestorePoint(Base):
     snapshot_id: Mapped[str] = mapped_column(String(80), nullable=False)
     retention: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AutomationPolicy(Base):
+    """Declarative automation policy (S4) — the shape every File 2 automation uses.
+
+    Persisted as structured JSON sub-documents validated by Pydantic at the API
+    boundary. Policies are reproducible config (GitOps/Terraform); each reconcile
+    run becomes a Job + audit event.
+    """
+
+    __tablename__ = "automation_policy"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_automation_policy_workspace_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    selector: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    trigger: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    action: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    guardrails: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    alerting: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
