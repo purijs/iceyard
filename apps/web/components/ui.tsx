@@ -29,13 +29,15 @@ export function Button({
   variant = "secondary",
   onClick,
   type = "button",
-  full = false
+  full = false,
+  disabled = false
 }: {
   children: ReactNode;
   variant?: "primary" | "secondary" | "danger" | "ghost";
   onClick?: () => void;
   type?: "button" | "submit";
   full?: boolean;
+  disabled?: boolean;
 }) {
   const styles = {
     primary: "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800",
@@ -47,7 +49,8 @@ export function Button({
     <button
       type={type}
       onClick={onClick}
-      className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium transition ${styles[variant]} ${full ? "w-full" : ""}`}
+      disabled={disabled}
+      className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${full ? "w-full" : ""}`}
     >
       {children}
     </button>

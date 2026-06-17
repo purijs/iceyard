@@ -3,6 +3,9 @@ export type UserRead = {
   workspace_id: string;
   email: string;
   display_name: string;
+  is_active: boolean;
+  is_service_account: boolean;
+  created_at: string;
 };
 
 export type TokenResponse = {
@@ -106,6 +109,12 @@ export type OperationDescriptor = {
   gates: string[];
 };
 
+export type OperationCategoryRead = {
+  name: string;
+  operation_count: number;
+  safety_classes: OperationDescriptor["safety_class"][];
+};
+
 export type OperationDryRunRead = {
   id: string;
   operation_id: string;
@@ -115,6 +124,13 @@ export type OperationDryRunRead = {
   gate_results: Array<{ id: string; label: string; status: "passed" | "blocked" | "pending"; detail: string }>;
   metrics: Record<string, unknown>;
   created_at: string;
+};
+
+export type OperationExecuteRead = {
+  status: "queued" | "requires_approval" | "blocked";
+  message: string;
+  job_id: string | null;
+  approval_request_id: string | null;
 };
 
 export type JobRead = {
