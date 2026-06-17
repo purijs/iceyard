@@ -19,7 +19,7 @@ from iceyard_api.db.models import (
     User,
 )
 from iceyard_api.operations.executor import OperationExecutor
-from iceyard_api.operations.registry import OPERATION_BY_ID, OPERATIONS
+from iceyard_api.operations.registry import CATEGORY_ORDER, OPERATION_BY_ID, OPERATIONS
 from iceyard_api.operations.schemas import (
     GateResult,
     OperationCategoryRead,
@@ -52,16 +52,24 @@ class OperationService:
         self.executor = OperationExecutor()
 
     def list_descriptors(self) -> list[OperationDescriptor]:
+        descriptors = {descriptor.id: descriptor for descriptor in OPERATIONS}
         rows = list(
             self.session.scalars(
                 select(OperationDescriptorModel).order_by(OperationDescriptorModel.id)
             )
         )
-        if not rows:
-            return OPERATIONS
-        return [OperationDescriptor.model_validate(row.payload) for row in rows]
+        for row in rows:
+            descriptors[row.id] = OperationDescriptor.model_validate(row.payload)
+
+        category_rank = {category: index for index, category in enumerate(CATEGORY_ORDER)}
+        return sorted(
+            descriptors.values(),
+            key=lambda item: (category_rank.get(item.category, 999), item.category, item.name),
+        )
 
     def get_descriptor(self, operation_id: str) -> OperationDescriptor:
+        if operation_id in OPERATION_BY_ID:
+            return descriptor_by_id(operation_id)
         row = self.session.get(OperationDescriptorModel, operation_id)
         if not row:
             return descriptor_by_id(operation_id)
@@ -113,10 +121,12 @@ class OperationService:
         table = self._get_table(actor.workspace_id, payload.table_id)
         table_name = table.name if table else "catalog.table"
         params = self._params_with_defaults(descriptor, payload.params)
+        render_values = self._render_values(table, params)
         compiled_command = render_template(
             descriptor.sql_template,
-            {"table": table_name, **params},
+            render_values,
         )
+        params = {key: render_values.get(key, value) for key, value in params.items()}
         gate_results = self._evaluate_gates(descriptor, params, table)
         metrics = self.executor.dry_run(
             descriptor=descriptor,
@@ -316,6 +326,30 @@ class OperationService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Invalid value for parameter: {param.name}",
                 )
+        return values
+
+    def _render_values(
+        self, table: IcebergTable | None, params: dict[str, object]
+    ) -> dict[str, object]:
+        full_name = table.name if table else "catalog.table"
+        namespace, _, table_name = full_name.rpartition(".")
+        if not namespace:
+            namespace = "default"
+            table_name = full_name
+        values: dict[str, object] = {
+            "catalog": "iceyard",
+            "table": full_name,
+            "qualified_table": full_name,
+            "ns": namespace,
+            "namespace": namespace,
+            "table_name": table_name,
+            "location": table.location if table else "",
+        }
+        for key, value in params.items():
+            if isinstance(value, str) and "{" in value and "}" in value:
+                values[key] = render_template(value, values)
+            else:
+                values[key] = value
         return values
 
     def _evaluate_gates(

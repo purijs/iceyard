@@ -1,13 +1,16 @@
 "use client";
 
-import { Boxes, Database, LayoutDashboard, ListChecks, Search, Shield, Table2, TerminalSquare, Users2 } from "lucide-react";
+import { Boxes, Database, GitBranch, LayoutDashboard, ListChecks, Search, Shield, Sparkles, Table2, TerminalSquare, Users2, Wrench } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui";
 import { Dashboard } from "@/features/dashboard/Dashboard";
+import { Automation } from "@/features/automation/Automation";
 import { Connections } from "@/features/connections/Connections";
+import { Environments } from "@/features/environments/Environments";
 import { Governance } from "@/features/governance/Governance";
 import { Jobs } from "@/features/jobs/Jobs";
+import { Maintenance } from "@/features/maintenance/Maintenance";
 import { Operations } from "@/features/operations/Operations";
 import { AuthGate } from "@/features/settings/AuthGate";
 import { Tables } from "@/features/tables/Tables";
@@ -32,9 +35,12 @@ const NAV = [
   ["connections", "Connections", Database],
   ["tables", "Tables", Table2],
   ["operations", "Operations", TerminalSquare],
+  ["maintenance", "Maintenance", Wrench],
   ["jobs", "Jobs", ListChecks],
-  ["users", "Users", Users2],
-  ["governance", "Governance", Shield]
+  ["environments", "Environments", GitBranch],
+  ["governance", "Governance", Shield],
+  ["automation", "Automation", Sparkles],
+  ["users", "Users", Users2]
 ] as const;
 
 type View = (typeof NAV)[number][0];
@@ -116,6 +122,11 @@ export default function Home() {
   }
 
   const title = view === "tables" && selectedTable ? "Table detail" : NAV.find(([key]) => key === view)?.[1] ?? "Overview";
+  const openOperation = (operationId: string, table: TableRead) => {
+    setSelectedTable(table);
+    setOpenOperationId(operationId);
+    setView("operations");
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-50 text-zinc-950">
@@ -170,15 +181,14 @@ export default function Home() {
           ) : null}
           {view === "tables" ? (
             <Tables
+              token={token}
               tables={tables}
+              environments={environments}
               selected={selectedTable}
               health={selectedHealth}
+              operations={operations}
               onSelect={setSelectedTable}
-              onOpenOperation={(operationId, table) => {
-                setSelectedTable(table);
-                setOpenOperationId(operationId);
-                setView("operations");
-              }}
+              onOpenOperation={openOperation}
             />
           ) : null}
           {view === "operations" ? (
@@ -188,13 +198,19 @@ export default function Home() {
               selectedTable={selectedTable}
               openOperationId={openOperationId}
               onClose={() => setOpenOperationId(null)}
+              onExecuted={() => load(token)}
             />
           ) : null}
-          {view === "jobs" ? <Jobs jobs={jobs} /> : null}
+          {view === "maintenance" ? <Maintenance tables={tables} operations={operations} onOpenOperation={openOperation} /> : null}
+          {view === "jobs" ? (
+            <Jobs token={token} jobs={jobs} tables={tables} operations={operations} onOpenOperation={openOperation} onRefresh={() => load(token)} />
+          ) : null}
+          {view === "environments" ? <Environments environments={environments} connections={connections} /> : null}
           {view === "users" ? (
             <Users token={token} users={users} roles={roles} currentUserId={user?.id ?? null} onRefresh={() => load(token)} />
           ) : null}
           {view === "governance" ? <Governance audit={audit} /> : null}
+          {view === "automation" ? <Automation tables={tables} operations={operations} onOpenOperation={openOperation} /> : null}
         </main>
       </div>
     </div>

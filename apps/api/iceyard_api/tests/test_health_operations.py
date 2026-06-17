@@ -40,6 +40,7 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
 
     descriptors = client.get("/api/v1/operations/descriptors", headers=headers)
     assert descriptors.status_code == 200
+    assert len(descriptors.json()) >= 75
     operation_ids = {operation["id"] for operation in descriptors.json()}
     assert {"rewrite_data_files", "remove_orphan_files", "expire_snapshots"} <= operation_ids
 
@@ -54,6 +55,12 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
     descriptor = client.get("/api/v1/operations/descriptors/rewrite_data_files", headers=headers)
     assert descriptor.status_code == 200
     assert descriptor.json()["safety_class"] == "REWRITE"
+
+    preview = client.get(
+        f"/api/v1/tables/{risky_table['id']}/preview?resource=refs", headers=headers
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows"]
 
     unsupported = client.post(
         "/api/v1/operations/dry-run",

@@ -80,6 +80,22 @@ TABLE_FIXTURES = [
         0.38,
         "sales-eng",
     ),
+    (
+        "prod",
+        "analytics",
+        "sessions",
+        2,
+        90,
+        140,
+        1_200_000_000_000,
+        10,
+        28,
+        12,
+        0.11,
+        "data-platform",
+    ),
+    ("prod", "sales", "orders", 2, 86, 180, 2_400_000_000_000, 60, 44, 32, 0.14, "sales-eng"),
+    ("prod", "marketing", "campaigns", 2, 83, 72, 81_000_000_000, 6, 16, 7, 0.07, "growth"),
     ("prod", "finance", "ledger", 2, 81, 210, 780_000_000_000, 30, 52, 42, 0.19, "finance-eng"),
 ]
 
@@ -209,11 +225,41 @@ class IcebergIndexService:
             self.session.add(
                 Snapshot(
                     table_id=table.id,
+                    snapshot_id="7711203948855120",
+                    parent_snapshot_id="7610288471002934",
+                    operation="append",
+                    summary={"added_files": 96, "removed_files": 0, "bytes": 4_000_000_000},
+                    committed_at=now - timedelta(days=3, hours=6),
+                )
+            )
+            self.session.add(
+                Snapshot(
+                    table_id=table.id,
+                    snapshot_id="7610288471002934",
+                    parent_snapshot_id="7588120049923847",
+                    operation="delete",
+                    summary={"added_files": 0, "removed_files": 38, "bytes": -1_200_000_000},
+                    committed_at=now - timedelta(days=4),
+                )
+            )
+            self.session.add(
+                Snapshot(
+                    table_id=table.id,
                     snapshot_id="7588120049923847",
                     parent_snapshot_id=None,
                     operation="rewrite",
                     summary={"added_files": 12, "removed_files": 480, "bytes": -400_000_000},
                     committed_at=now - timedelta(days=7),
+                )
+            )
+            self.session.add(
+                Snapshot(
+                    table_id=table.id,
+                    snapshot_id="7401093847710022",
+                    parent_snapshot_id=None,
+                    operation="append",
+                    summary={"added_files": 210, "removed_files": 0, "bytes": 9_400_000_000},
+                    committed_at=now - timedelta(days=9),
                 )
             )
             self.session.add(
@@ -225,12 +271,26 @@ class IcebergIndexService:
                             {"id": 1, "name": "event_id", "type": "long", "required": True},
                             {"id": 2, "name": "user_id", "type": "long", "required": True},
                             {"id": 3, "name": "event_type", "type": "string", "required": True},
-                            {"id": 4, "name": "payload", "type": "variant", "required": False},
+                            {
+                                "id": 4,
+                                "name": "payload",
+                                "type": "variant",
+                                "required": False,
+                                "note": "v3 semi-structured",
+                            },
                             {
                                 "id": 5,
+                                "name": "device_type",
+                                "type": "string",
+                                "required": False,
+                                "note": "Added 2026-05-30",
+                            },
+                            {
+                                "id": 6,
                                 "name": "occurred_at",
                                 "type": "timestamptz",
                                 "required": True,
+                                "note": "Partition source",
                             },
                         ]
                     },
@@ -265,6 +325,25 @@ class IcebergIndexService:
             self.session.add(
                 TableRef(
                     table_id=table.id,
+                    name="audit-2026-06",
+                    ref_type="branch",
+                    snapshot_id="7711203948855120",
+                    retention={"max_ref_age": "7d"},
+                    is_protected=False,
+                )
+            )
+            self.session.add(
+                TableRef(
+                    table_id=table.id,
+                    name="release-2026.06.09",
+                    ref_type="tag",
+                    snapshot_id="7401093847710022",
+                    retention={"retain": "30d"},
+                )
+            )
+            self.session.add(
+                TableRef(
+                    table_id=table.id,
                     name="pre-compaction-restore",
                     ref_type="tag",
                     snapshot_id="7588120049923847",
@@ -292,9 +371,8 @@ class IcebergIndexService:
         refreshed_at = utcnow()
         table_stmt = select(IcebergTable).where(IcebergTable.workspace_id == workspace_id)
         if catalog_connection_id:
-            table_stmt = (
-                table_stmt.join(Namespace)
-                .where(Namespace.catalog_connection_id == catalog_connection_id)
+            table_stmt = table_stmt.join(Namespace).where(
+                Namespace.catalog_connection_id == catalog_connection_id
             )
         tables = list(self.session.scalars(table_stmt))
         for table in tables:
@@ -390,8 +468,175 @@ class IcebergIndexService:
     def list_sort_orders(self, table_id: str) -> list[SortOrder]:
         return list(
             self.session.scalars(
-                select(SortOrder)
-                .where(SortOrder.table_id == table_id)
-                .order_by(SortOrder.order_id)
+                select(SortOrder).where(SortOrder.table_id == table_id).order_by(SortOrder.order_id)
             )
         )
+
+    def preview_table_resource(self, table: IcebergTable, resource: str) -> dict[str, object]:
+        resource = resource.lower().replace("-", "_")
+        table_name = table.name
+        rows = {
+            "rows": {
+                "query": f"SELECT * FROM {table_name} LIMIT 5",
+                "columns": ["event_id", "user_id", "event_type", "device_type", "occurred_at"],
+                "rows": [
+                    {
+                        "event_id": 4820193,
+                        "user_id": 771,
+                        "event_type": "page_view",
+                        "device_type": "ios",
+                        "occurred_at": "2026-06-14 09:40:11",
+                    },
+                    {
+                        "event_id": 4820194,
+                        "user_id": 118,
+                        "event_type": "add_to_cart",
+                        "device_type": "web",
+                        "occurred_at": "2026-06-14 09:40:13",
+                    },
+                    {
+                        "event_id": 4820195,
+                        "user_id": 771,
+                        "event_type": "checkout",
+                        "device_type": "ios",
+                        "occurred_at": "2026-06-14 09:40:20",
+                    },
+                    {
+                        "event_id": 4820196,
+                        "user_id": 552,
+                        "event_type": "page_view",
+                        "device_type": "android",
+                        "occurred_at": "2026-06-14 09:40:22",
+                    },
+                    {
+                        "event_id": 4820197,
+                        "user_id": 118,
+                        "event_type": "purchase",
+                        "device_type": "web",
+                        "occurred_at": "2026-06-14 09:40:31",
+                    },
+                ],
+                "masked_columns": [],
+            },
+            "files": {
+                "query": f"SELECT * FROM {table_name}.files LIMIT 5",
+                "columns": [
+                    "content",
+                    "file_path",
+                    "record_count",
+                    "file_size_in_bytes",
+                    "partition",
+                ],
+                "rows": [
+                    {
+                        "content": "data",
+                        "file_path": f"{table.location}/data/00001.parquet",
+                        "record_count": 181220,
+                        "file_size_in_bytes": 532_800_000,
+                        "partition": "2026-06-14",
+                    },
+                    {
+                        "content": "data",
+                        "file_path": f"{table.location}/data/00002.parquet",
+                        "record_count": 177044,
+                        "file_size_in_bytes": 518_200_000,
+                        "partition": "2026-06-14",
+                    },
+                ],
+                "masked_columns": ["file_path"],
+            },
+            "manifests": {
+                "query": f"SELECT * FROM {table_name}.manifests LIMIT 5",
+                "columns": [
+                    "manifest_path",
+                    "added_files_count",
+                    "existing_files_count",
+                    "deleted_files_count",
+                ],
+                "rows": [
+                    {
+                        "manifest_path": f"{table.location}/metadata/manifest-0001.avro",
+                        "added_files_count": 142,
+                        "existing_files_count": 884,
+                        "deleted_files_count": 0,
+                    },
+                    {
+                        "manifest_path": f"{table.location}/metadata/manifest-0002.avro",
+                        "added_files_count": 12,
+                        "existing_files_count": 480,
+                        "deleted_files_count": 38,
+                    },
+                ],
+                "masked_columns": ["manifest_path"],
+            },
+            "snapshots": {
+                "query": f"SELECT * FROM {table_name}.snapshots LIMIT 5",
+                "columns": ["snapshot_id", "operation", "committed_at", "summary"],
+                "rows": [
+                    {
+                        "snapshot_id": snapshot.snapshot_id,
+                        "operation": snapshot.operation,
+                        "committed_at": snapshot.committed_at.isoformat(),
+                        "summary": snapshot.summary,
+                    }
+                    for snapshot in self.list_snapshots(table.id)[:5]
+                ],
+                "masked_columns": [],
+            },
+            "partitions": {
+                "query": f"SELECT * FROM {table_name}.partitions LIMIT 5",
+                "columns": ["partition", "record_count", "file_count", "total_size"],
+                "rows": [
+                    {
+                        "partition": "days(occurred_at)=2026-06-14",
+                        "record_count": 2_118_420,
+                        "file_count": 84,
+                        "total_size": 6_100_000_000,
+                    },
+                    {
+                        "partition": "days(occurred_at)=2026-06-13",
+                        "record_count": 1_902_011,
+                        "file_count": 79,
+                        "total_size": 4_000_000_000,
+                    },
+                ],
+                "masked_columns": [],
+            },
+            "refs": {
+                "query": f"SELECT * FROM {table_name}.refs",
+                "columns": ["type", "name", "snapshot_id", "retention"],
+                "rows": [
+                    {
+                        "type": ref.ref_type,
+                        "name": ref.name,
+                        "snapshot_id": ref.snapshot_id,
+                        "retention": ref.retention,
+                    }
+                    for ref in self.list_refs(table.id)
+                ],
+                "masked_columns": [],
+            },
+            "position_deletes": {
+                "query": f"SELECT * FROM {table_name}.position_deletes LIMIT 5",
+                "columns": ["delete_file_path", "deleted_rows", "referenced_data_file"],
+                "rows": [
+                    {
+                        "delete_file_path": f"{table.location}/delete/00001.parquet",
+                        "deleted_rows": 812,
+                        "referenced_data_file": "data/00041.parquet",
+                    },
+                    {
+                        "delete_file_path": f"{table.location}/delete/00002.parquet",
+                        "deleted_rows": 128,
+                        "referenced_data_file": "data/00042.parquet",
+                    },
+                ],
+                "masked_columns": ["delete_file_path"],
+            },
+        }
+        selected = rows.get(resource, rows["rows"])
+        return {
+            "resource": resource if resource in rows else "rows",
+            "rate_limited": True,
+            **selected,
+        }

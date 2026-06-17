@@ -5,13 +5,21 @@ import type {
   DashboardRead,
   EnvironmentRead,
   HealthRead,
+  JobLogRead,
   JobRead,
+  JobRunRead,
   OperationCategoryRead,
   OperationDescriptor,
   OperationDryRunRead,
   OperationExecuteRead,
+  PartitionSpecRead,
   RoleRead,
+  SchemaVersionRead,
+  SnapshotRead,
+  SortOrderRead,
+  TablePreviewRead,
   TableRead,
+  TableRefRead,
   TokenResponse,
   UserDetailRead,
   UserRead
@@ -60,9 +68,21 @@ export const api = {
   dashboard: (token: string) => request<DashboardRead>("/api/v1/dashboard", {}, token),
   tables: (token: string) => request<TableRead[]>("/api/v1/tables", {}, token),
   tableHealth: (token: string, tableId: string) => request<HealthRead>(`/api/v1/tables/${tableId}/health`, {}, token),
+  tableSnapshots: (token: string, tableId: string) =>
+    request<SnapshotRead[]>(`/api/v1/tables/${tableId}/snapshots`, {}, token),
+  tableRefs: (token: string, tableId: string) =>
+    request<TableRefRead[]>(`/api/v1/tables/${tableId}/refs`, {}, token),
+  tableSchema: (token: string, tableId: string) =>
+    request<SchemaVersionRead[]>(`/api/v1/tables/${tableId}/schema`, {}, token),
+  tablePartitions: (token: string, tableId: string) =>
+    request<PartitionSpecRead[]>(`/api/v1/tables/${tableId}/partitions`, {}, token),
+  tableSortOrders: (token: string, tableId: string) =>
+    request<SortOrderRead[]>(`/api/v1/tables/${tableId}/sort-orders`, {}, token),
+  tablePreview: (token: string, tableId: string, resource = "rows") =>
+    request<TablePreviewRead>(`/api/v1/tables/${tableId}/preview?resource=${encodeURIComponent(resource)}`, {}, token),
   environments: (token: string) => request<EnvironmentRead[]>("/api/v1/environments", {}, token),
   connections: (token: string) => request<CatalogConnectionRead[]>("/api/v1/connections/catalogs", {}, token),
-  createEnvironment: (token: string, body: { name: string; kind: string; region?: string }) =>
+  createEnvironment: (token: string, body: { name: string; kind: string; region?: string; posture?: Record<string, unknown> }) =>
     request<EnvironmentRead>("/api/v1/environments", { method: "POST", body: JSON.stringify(body) }, token),
   createCatalogConnection: (
     token: string,
@@ -72,9 +92,23 @@ export const api = {
       catalog_type: string;
       endpoint?: string;
       warehouse?: string;
+      auth_ref?: string | null;
       settings?: Record<string, unknown>;
     }
   ) => request<CatalogConnectionRead>("/api/v1/connections/catalogs", { method: "POST", body: JSON.stringify(body) }, token),
+  createObjectStoreConnection: (
+    token: string,
+    body: {
+      environment_id: string;
+      name: string;
+      store_type: "s3" | "gcs" | "adls" | "hdfs" | "local";
+      endpoint?: string;
+      region?: string;
+      auth_ref?: string;
+      settings?: Record<string, unknown>;
+    }
+  ) =>
+    request<{ id: string }>("/api/v1/connections/object-stores", { method: "POST", body: JSON.stringify(body) }, token),
   operations: (token: string) => request<OperationDescriptor[]>("/api/v1/operations/descriptors", {}, token),
   operationCategories: (token: string) =>
     request<OperationCategoryRead[]>("/api/v1/operations/descriptors/categories", {}, token),
@@ -96,5 +130,9 @@ export const api = {
       token
     ),
   jobs: (token: string) => request<JobRead[]>("/api/v1/jobs", {}, token),
+  jobRuns: (token: string, jobId: string) => request<JobRunRead[]>(`/api/v1/jobs/${jobId}/runs`, {}, token),
+  jobLogs: (token: string, jobId: string) => request<JobLogRead[]>(`/api/v1/jobs/${jobId}/logs`, {}, token),
+  cancelJob: (token: string, jobId: string) =>
+    request<JobRead>(`/api/v1/jobs/${jobId}/cancel`, { method: "POST", body: JSON.stringify({}) }, token),
   audit: (token: string) => request<AuditEventRead[]>("/api/v1/audit", {}, token)
 };

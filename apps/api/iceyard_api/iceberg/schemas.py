@@ -107,3 +107,12 @@ class SortOrderRead(BaseModel):
     order_id: int
     fields: list[dict[str, Any]]
     is_current: bool
+
+
+class TablePreviewRead(BaseModel):
+    resource: str
+    query: str
+    columns: list[str]
+    rows: list[dict[str, Any]]
+    rate_limited: bool = True
+    masked_columns: list[str] = []

@@ -72,6 +72,8 @@ export type CatalogConnectionRead = {
   catalog_type: string;
   endpoint: string | null;
   warehouse: string | null;
+  auth_ref: string | null;
+  settings: Record<string, unknown>;
   capabilities: Record<string, unknown>;
   is_enabled: boolean;
   last_tested_at: string | null;
@@ -110,6 +112,59 @@ export type OperationDescriptor = {
   gates: string[];
 };
 
+export type SnapshotRead = {
+  id: string;
+  table_id: string;
+  snapshot_id: string;
+  parent_snapshot_id: string | null;
+  operation: string;
+  summary: Record<string, unknown>;
+  committed_at: string;
+};
+
+export type TableRefRead = {
+  id: string;
+  table_id: string;
+  name: string;
+  ref_type: string;
+  snapshot_id: string;
+  retention: Record<string, unknown>;
+  is_protected: boolean;
+};
+
+export type SchemaVersionRead = {
+  id: string;
+  table_id: string;
+  schema_id: number;
+  table_schema: { fields?: Array<Record<string, unknown>> };
+  created_at: string;
+};
+
+export type PartitionSpecRead = {
+  id: string;
+  table_id: string;
+  spec_id: number;
+  spec: Record<string, unknown>;
+  is_current: boolean;
+};
+
+export type SortOrderRead = {
+  id: string;
+  table_id: string;
+  order_id: number;
+  fields: Array<Record<string, unknown>>;
+  is_current: boolean;
+};
+
+export type TablePreviewRead = {
+  resource: string;
+  query: string;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rate_limited: boolean;
+  masked_columns: string[];
+};
+
 export type OperationCategoryRead = {
   name: string;
   operation_count: number;
@@ -142,6 +197,28 @@ export type JobRead = {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type JobRunRead = {
+  id: string;
+  job_id: string;
+  status: string;
+  engine: string;
+  compiled_command: string;
+  dry_run: boolean;
+  pre_op_restore_ref: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  metrics: Record<string, unknown>;
+  error: string | null;
+};
+
+export type JobLogRead = {
+  id: string;
+  job_run_id: string;
+  level: string;
+  message: string;
+  created_at: string;
 };
 
 export type AuditEventRead = {
