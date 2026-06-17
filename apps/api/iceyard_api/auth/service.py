@@ -22,6 +22,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "connections.manage",
         "tables.read",
         "operations.read",
+        "operations.manage",
         "operations.execute",
         "jobs.read",
         "audit.read",

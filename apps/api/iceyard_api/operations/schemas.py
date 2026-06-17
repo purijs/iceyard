@@ -34,6 +34,17 @@ class OperationDescriptor(BaseModel):
     docs_url: str | None = None
 
 
+class OperationCategoryRead(BaseModel):
+    name: str
+    operation_count: int
+    safety_classes: list[SafetyClass]
+
+
+class OperationDescriptorSeedResult(BaseModel):
+    inserted: int
+    updated: int
+
+
 class OperationDryRunRequest(BaseModel):
     operation_id: str
     table_id: str | None = None

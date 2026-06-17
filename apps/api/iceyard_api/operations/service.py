@@ -1,4 +1,5 @@
 from string import Formatter
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -11,15 +12,19 @@ from iceyard_api.db.models import (
     Job,
     JobLog,
     JobRun,
+    OperationDescriptorModel,
     OperationRequest,
     RestorePoint,
+    TableRef,
     User,
 )
 from iceyard_api.operations.executor import OperationExecutor
 from iceyard_api.operations.registry import OPERATION_BY_ID, OPERATIONS
 from iceyard_api.operations.schemas import (
     GateResult,
+    OperationCategoryRead,
     OperationDescriptor,
+    OperationDescriptorSeedResult,
     OperationDryRunRead,
     OperationDryRunRequest,
     OperationExecuteRead,
@@ -47,10 +52,64 @@ class OperationService:
         self.executor = OperationExecutor()
 
     def list_descriptors(self) -> list[OperationDescriptor]:
-        return OPERATIONS
+        rows = list(
+            self.session.scalars(
+                select(OperationDescriptorModel).order_by(OperationDescriptorModel.id)
+            )
+        )
+        if not rows:
+            return OPERATIONS
+        return [OperationDescriptor.model_validate(row.payload) for row in rows]
+
+    def get_descriptor(self, operation_id: str) -> OperationDescriptor:
+        row = self.session.get(OperationDescriptorModel, operation_id)
+        if not row:
+            return descriptor_by_id(operation_id)
+        return OperationDescriptor.model_validate(row.payload)
+
+    def list_categories(self) -> list[OperationCategoryRead]:
+        grouped: dict[str, list[OperationDescriptor]] = {}
+        for descriptor in self.list_descriptors():
+            grouped.setdefault(descriptor.category, []).append(descriptor)
+        return [
+            OperationCategoryRead(
+                name=name,
+                operation_count=len(items),
+                safety_classes=sorted({item.safety_class for item in items}),
+            )
+            for name, items in sorted(grouped.items())
+        ]
+
+    def seed_descriptors(self) -> OperationDescriptorSeedResult:
+        inserted = 0
+        updated = 0
+        for descriptor in OPERATIONS:
+            payload = descriptor.model_dump(mode="json")
+            row = self.session.get(OperationDescriptorModel, descriptor.id)
+            if not row:
+                self.session.add(
+                    OperationDescriptorModel(id=descriptor.id, version=1, payload=payload)
+                )
+                inserted += 1
+            elif row.payload != payload:
+                row.version += 1
+                row.payload = payload
+                updated += 1
+        self.session.flush()
+        return OperationDescriptorSeedResult(inserted=inserted, updated=updated)
 
     def dry_run(self, *, payload: OperationDryRunRequest, actor: User) -> OperationDryRunRead:
-        descriptor = descriptor_by_id(payload.operation_id)
+        descriptor = self.get_descriptor(payload.operation_id)
+        if not descriptor.dry_run_supported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Dry-run is not supported for this operation.",
+            )
+        if payload.engine not in descriptor.supported_engines:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Engine is not supported for this operation.",
+            )
         table = self._get_table(actor.workspace_id, payload.table_id)
         table_name = table.name if table else "catalog.table"
         params = self._params_with_defaults(descriptor, payload.params)
@@ -58,7 +117,7 @@ class OperationService:
             descriptor.sql_template,
             {"table": table_name, **params},
         )
-        gate_results = self._evaluate_gates(descriptor, params)
+        gate_results = self._evaluate_gates(descriptor, params, table)
         metrics = self.executor.dry_run(
             descriptor=descriptor,
             compiled_command=compiled_command,
@@ -103,7 +162,12 @@ class OperationService:
         )
 
     def execute(
-        self, *, dry_run_id: str, actor: User, confirmation: str | None
+        self,
+        *,
+        dry_run_id: str,
+        actor: User,
+        confirmation: str | None,
+        idempotency_key: str | None = None,
     ) -> OperationExecuteRead:
         request = self.session.scalar(
             select(OperationRequest).where(
@@ -113,12 +177,26 @@ class OperationService:
         )
         if not request:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dry-run not found.")
-        descriptor = descriptor_by_id(request.operation_id)
+        descriptor = self.get_descriptor(request.operation_id)
         blocked = [gate for gate in request.gate_results if gate.get("status") == "blocked"]
         if blocked:
             return OperationExecuteRead(
                 status="blocked",
                 message="One or more safety gates are blocked.",
+                job_id=None,
+                approval_request_id=None,
+            )
+        if descriptor.safety_class == "DESTRUCTIVE" and confirmation != request.operation_id:
+            return OperationExecuteRead(
+                status="blocked",
+                message="Confirmation did not match the operation identifier.",
+                job_id=None,
+                approval_request_id=None,
+            )
+        if "idempotent_retry" in descriptor.gates and not idempotency_key:
+            return OperationExecuteRead(
+                status="blocked",
+                message="An idempotency key is required for this operation.",
                 job_id=None,
                 approval_request_id=None,
             )
@@ -147,13 +225,6 @@ class OperationService:
                 approval_request_id=approval.id,
                 job_id=None,
                 message="Approval is required before this operation can run.",
-            )
-        if descriptor.safety_class == "DESTRUCTIVE" and confirmation != request.operation_id:
-            return OperationExecuteRead(
-                status="blocked",
-                message="Confirmation did not match the operation identifier.",
-                job_id=None,
-                approval_request_id=None,
             )
         job = Job(
             workspace_id=actor.workspace_id,
@@ -206,6 +277,7 @@ class OperationService:
             workspace_id=actor.workspace_id,
             actor_id=actor.id,
             after_state={"operation_id": descriptor.id, "restore_point": restore_ref},
+            metadata={"idempotency_key": idempotency_key},
         )
         self.session.commit()
         return OperationExecuteRead(
@@ -239,10 +311,18 @@ class OperationService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Missing required parameter: {param.name}",
                 )
+            if param.options and param.name in values and values[param.name] not in param.options:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid value for parameter: {param.name}",
+                )
         return values
 
     def _evaluate_gates(
-        self, descriptor: OperationDescriptor, params: dict[str, object]
+        self,
+        descriptor: OperationDescriptor,
+        params: dict[str, object],
+        table: IcebergTable | None,
     ) -> list[GateResult]:
         results: list[GateResult] = []
         for gate in descriptor.gates:
@@ -258,8 +338,27 @@ class OperationService:
                 )
             if gate == "path_authority_check":
                 detail = "Path and authority validation placeholder passed."
+                location = params.get("location")
+                if (
+                    table
+                    and isinstance(location, str)
+                    and location
+                    and urlparse(location).netloc != urlparse(table.location).netloc
+                ):
+                    status_value = "blocked"
+                    detail = "Requested location does not match the table storage authority."
             if gate == "reader_compatibility_check":
                 detail = "Reader compatibility validation placeholder passed."
+                if table and params.get("target_version") == 3 and table.format_version < 3:
+                    status_value = "pending"
+                    detail = "Reader compatibility review is required before v3 upgrade."
+            if gate == "protected_ref_check" and table:
+                protected = self.session.scalar(
+                    select(TableRef.id).where(TableRef.table_id == table.id, TableRef.is_protected)
+                )
+                if protected:
+                    status_value = "pending"
+                    detail = "Protected refs must be retained or explicitly reviewed."
             results.append(
                 GateResult(
                     id=gate, label=gate.replace("_", " "), status=status_value, detail=detail
