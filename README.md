@@ -52,4 +52,10 @@ make web-build
 
 The current implementation includes built-in auth, roles, audit logging, connection records, mock Iceberg table indexing, health scoring, operation descriptors, dry-run records, approval requests, jobs, and a web console.
 
-Real Iceberg catalog and execution adapters are intentionally behind interfaces and are not enabled in this build.
+It also includes the performance/layout/lifecycle automations: a layout & stats model, layout what-if simulation, clustering and materialized-view advisors, Parquet and write-distribution tuning, retention/TTL simulation and cleanup, Write-Audit-Publish pipelines, and declarative automation policies. See [docs/automations.md](docs/automations.md) for the endpoints and an explicit real-vs-mocked breakdown.
+
+Real Iceberg catalog and execution adapters are intentionally behind interfaces and are not enabled in this build; automation outputs are projections/heuristics over the indexed metadata, clearly labelled in each response.
+
+### CORS
+
+`ICEYARD_CORS_ORIGINS` lists allowed origins (default `http://localhost:3000`). In `local`/`test` mode, private-LAN origins (e.g. `http://192.168.x.x:3000`) are allowed automatically so the console works from another device. Set `ICEYARD_CORS_ORIGIN_REGEX` to override for staging/production.
