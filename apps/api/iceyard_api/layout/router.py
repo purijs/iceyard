@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from iceyard_api.db.models import User
 from iceyard_api.db.session import get_session
+from iceyard_api.editions.service import require_feature
 from iceyard_api.layout.schemas import LayoutProfileRead
 from iceyard_api.layout.service import LayoutStatsService
 from iceyard_api.layout.whatif_schemas import WhatIfRequest, WhatIfResult
@@ -21,7 +22,11 @@ def get_layout_profile(
     return LayoutStatsService(session).profile(current_user.workspace_id, table_id)
 
 
-@router.post("/{table_id}/whatif", response_model=WhatIfResult)
+@router.post(
+    "/{table_id}/whatif",
+    response_model=WhatIfResult,
+    dependencies=[Depends(require_feature("layout_whatif"))],
+)
 def simulate_layout_change(
     table_id: str,
     payload: WhatIfRequest,

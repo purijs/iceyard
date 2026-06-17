@@ -10,6 +10,7 @@ import type {
   ClusteringAdvice,
   CleanupPreview,
   DistributionAdvice,
+  EditionRead,
   OperationDescriptor,
   ParquetAdvice,
   TableRead
@@ -41,11 +42,19 @@ export function Automation({
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id ?? "");
   const [advice, setAdvice] = useState<AdviceState>(EMPTY_ADVICE);
   const [loadingAdvice, setLoadingAdvice] = useState(false);
+  const [edition, setEdition] = useState<EditionRead | null>(null);
 
   const selectedTable = tables.find((table) => table.id === selectedTableId) ?? null;
+  const advisorLocked = edition ? edition.features.clustering_advisor === false : false;
+  const policiesLocked = edition ? edition.features.automation_policies === false : false;
 
   const loadPolicies = useCallback(() => {
+    if (policiesLocked) return;
     api.policies(token).then(setPolicies).catch((err: Error) => setError(err.message));
+  }, [token, policiesLocked]);
+
+  useEffect(() => {
+    api.edition(token).then(setEdition).catch(() => setEdition(null));
   }, [token]);
 
   useEffect(() => {
@@ -87,6 +96,13 @@ export function Automation({
     <div className="space-y-4">
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
+      ) : null}
+
+      {edition && (advisorLocked || policiesLocked) ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          You are on the <span className="font-mono">{edition.edition}</span> edition. Automation advisors and
+          policies are part of Iceyard Cloud / Enterprise — see iceyard.dev to upgrade.
+        </div>
       ) : null}
 
       <Panel
@@ -159,7 +175,7 @@ export function Automation({
                 </option>
               ))}
             </select>
-            <Button onClick={loadAdvice} disabled={!selectedTable || loadingAdvice}>
+            <Button onClick={loadAdvice} disabled={!selectedTable || loadingAdvice || advisorLocked}>
               <Gauge size={14} /> {loadingAdvice ? "Analyzing…" : "Analyze"}
             </Button>
           </div>

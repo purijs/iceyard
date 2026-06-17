@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("ICEYARD_DATABASE_URL", "sqlite:///./test_iceyard.db")
 os.environ.setdefault("ICEYARD_ENVIRONMENT", "test")
+# Tests exercise the full feature surface; gating itself is covered in test_editions.
+os.environ.setdefault("ICEYARD_EDITION", "enterprise")
 
 from iceyard_api.db.base import Base
 from iceyard_api.db.session import engine

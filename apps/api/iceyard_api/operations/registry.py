@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# The operation-descriptor registry is Apache-2.0 licensed (see LICENSING.md) so the
+# catalog can be reused freely by the CLI, Terraform provider, and integrations.
 from iceyard_api.operations.schemas import OperationDescriptor
 
 E_SQL = ["spark", "trino", "flink", "embedded"]

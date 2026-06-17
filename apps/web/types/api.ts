@@ -242,6 +242,11 @@ export type UserDetailRead = UserRead & {
   roles: Array<{ id: string; name: string }>;
 };
 
+export type EditionRead = {
+  edition: string;
+  features: Record<string, boolean>;
+};
+
 export type AutomationPolicy = {
   id: string;
   name: string;

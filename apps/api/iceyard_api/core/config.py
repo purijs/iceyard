@@ -10,6 +10,10 @@ class Settings(BaseSettings):
 
     app_name: str = "Iceyard"
     environment: Literal["local", "test", "staging", "production"] = "local"
+    # Commercial edition gate. The OSS build (published on GitHub, BSL-licensed) runs
+    # "oss"; the hosted SaaS at iceyard.dev runs "cloud"/"enterprise" to unlock paid
+    # features. See iceyard_api/editions and LICENSING.md.
+    edition: Literal["oss", "cloud", "enterprise"] = "oss"
     database_url: str = "sqlite:///./iceyard.db"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     cors_origin_regex: str | None = None

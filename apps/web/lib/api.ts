@@ -7,6 +7,7 @@ import type {
   ClusteringAdvice,
   DashboardRead,
   DistributionAdvice,
+  EditionRead,
   EnvironmentRead,
   HealthRead,
   ParquetAdvice,
@@ -143,6 +144,7 @@ export const api = {
   cancelJob: (token: string, jobId: string) =>
     request<JobRead>(`/api/v1/jobs/${jobId}/cancel`, { method: "POST", body: JSON.stringify({}) }, token),
   audit: (token: string) => request<AuditEventRead[]>("/api/v1/audit", {}, token),
+  edition: (token: string) => request<EditionRead>("/api/v1/edition", {}, token),
   policies: (token: string) => request<AutomationPolicy[]>("/api/v1/policies", {}, token),
   createPolicy: (token: string, body: Record<string, unknown>) =>
     request<AutomationPolicy>("/api/v1/policies", { method: "POST", body: JSON.stringify(body) }, token),
