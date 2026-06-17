@@ -1665,6 +1665,48 @@ RAW_OPERATIONS: list[dict[str, object]] = [
         description="Control pre-write shuffle to reduce small-file creation at the source.",
         params=[param("mode", "enum", default="hash", options=["none", "hash", "range"])],
     ),
+    op(
+        "cleanup_old_data",
+        "Clean up old data",
+        "Retention",
+        "DESTRUCTIVE",
+        E_MAINTENANCE,
+        "DELETE FROM {table} WHERE {time_column} < TIMESTAMP '{cutoff}'",
+        description="Enforce a data-retention TTL by deleting rows older than a cutoff.",
+        params=[
+            param("time_column", default="occurred_at", placeholder="occurred_at"),
+            param("cutoff", "timestamp", required=True, placeholder="2026-03-19 00:00:00"),
+            param("mode", "enum", default="soft", options=["soft", "hard", "archive"]),
+            param("archive_location", placeholder="s3://cold/events/", advanced=True),
+        ],
+        gates=[
+            "dry_run_required",
+            "max_delete_pct_guard",
+            "restore_point_required",
+            "approval_required",
+        ],
+    ),
+    op(
+        "backfill_default",
+        "Backfill column default",
+        "Retention",
+        "WRITE",
+        E_MAINTENANCE,
+        "UPDATE {table} SET {column} = {default_value} WHERE {column} IS NULL",
+        description="Physically populate existing NULLs with a v3 column default.",
+        params=[
+            param("column", "column", required=True, placeholder="device_type"),
+            param("default_value", required=True, placeholder="'unknown'"),
+            param(
+                "predicate",
+                "predicate",
+                placeholder="occurred_at >= DATE '2026-01-01'",
+                advanced=True,
+            ),
+        ],
+        gates=["dry_run_required", "affected_row_estimate", "restore_point_required"],
+        restore_point_required=True,
+    ),
 ]
 
 OPERATIONS = [OperationDescriptor.model_validate(item) for item in RAW_OPERATIONS]
