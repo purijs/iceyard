@@ -259,8 +259,8 @@ class LiveIcebergReader:
             properties[S3_ENDPOINT] = endpoint
         if isinstance(region, str) and region:
             properties[S3_REGION] = region
-        if settings.get("access_style") == "path-style":
-            properties[S3_FORCE_VIRTUAL_ADDRESSING] = "false"
+        if settings.get("access_style") == "virtual-hosted":
+            properties[S3_FORCE_VIRTUAL_ADDRESSING] = "true"
         storage_auth = settings.get("storage_auth")
         storage_auth = storage_auth if isinstance(storage_auth, dict) else {}
         access_key_id = storage_auth.get("aws_access_key_id")

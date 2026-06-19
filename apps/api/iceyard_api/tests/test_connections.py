@@ -5,8 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from iceyard_api.connections.service import ConnectionService
-from iceyard_api.db.models import CatalogConnection, SecretReference
+from iceyard_api.db.models import CatalogConnection, ObjectStoreConnection, SecretReference
 from iceyard_api.db.session import SessionLocal
+from iceyard_api.iceberg.live_metadata import LiveIcebergReader
 
 
 def test_connection_lifecycle(client: TestClient, token: str) -> None:
@@ -287,3 +288,67 @@ def test_jdbc_require_ssl_does_not_use_default_postgres_root_cert(
     assert test.status_code == 200
     assert captured["sslmode"] == "require"
     assert str(captured["sslrootcert"]).endswith("iceyard-no-postgres-root-ca.pem")
+
+
+def test_path_style_s3_storage_does_not_force_virtual_addressing() -> None:
+    catalog = CatalogConnection(
+        workspace_id="workspace",
+        environment_id="env",
+        name="catalog",
+        catalog_type="jdbc",
+        endpoint="jdbc:postgresql://database.internal:5432/iceberg_catalog",
+        settings={},
+        capabilities={},
+    )
+    store = ObjectStoreConnection(
+        workspace_id="workspace",
+        environment_id="env",
+        name="store",
+        store_type="s3",
+        endpoint="https://s3.internal",
+        region="eu-central-1",
+        settings={
+            "access_style": "path-style",
+            "storage_auth": {"mode": "static_key", "aws_access_key_id": "key"},
+        },
+    )
+    properties = LiveIcebergReader(
+        catalog=catalog,
+        object_store=store,
+        catalog_secret={},
+        storage_secret={"aws_secret_access_key": "secret"},
+    ).iceberg_properties()
+
+    assert properties["s3.endpoint"] == "https://s3.internal"
+    assert properties["s3.access-key-id"] == "key"
+    assert properties["s3.secret-access-key"] == "secret"
+    assert "s3.force-virtual-addressing" not in properties
+
+
+def test_virtual_hosted_s3_storage_sets_virtual_addressing() -> None:
+    catalog = CatalogConnection(
+        workspace_id="workspace",
+        environment_id="env",
+        name="catalog",
+        catalog_type="jdbc",
+        endpoint="jdbc:postgresql://database.internal:5432/iceberg_catalog",
+        settings={},
+        capabilities={},
+    )
+    store = ObjectStoreConnection(
+        workspace_id="workspace",
+        environment_id="env",
+        name="store",
+        store_type="s3",
+        endpoint="https://s3.amazonaws.com",
+        region="eu-central-1",
+        settings={"access_style": "virtual-hosted", "storage_auth": {"mode": "keyless"}},
+    )
+    properties = LiveIcebergReader(
+        catalog=catalog,
+        object_store=store,
+        catalog_secret={},
+        storage_secret={},
+    ).iceberg_properties()
+
+    assert properties["s3.force-virtual-addressing"] == "true"
