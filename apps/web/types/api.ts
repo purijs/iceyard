@@ -90,6 +90,18 @@ export type ObjectStoreConnectionRead = {
   settings: Record<string, unknown>;
 };
 
+export type ConnectionTestResult = {
+  connection_id: string;
+  status: "ok" | "warning" | "failed";
+  message: string;
+  capabilities: Record<string, unknown>;
+  components: Array<{
+    name: string;
+    status: "ok" | "warning" | "failed";
+    message: string;
+  }>;
+};
+
 export type ComputeBackendRead = {
   id: string;
   environment_id: string;

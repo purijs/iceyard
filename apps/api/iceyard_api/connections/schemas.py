@@ -62,11 +62,18 @@ class CatalogConnectionRead(CatalogConnectionCreate):
     created_at: datetime
 
 
+class ConnectionTestComponent(BaseModel):
+    name: str
+    status: Literal["ok", "warning", "failed"]
+    message: str
+
+
 class ConnectionTestResult(BaseModel):
     connection_id: str
     status: Literal["ok", "warning", "failed"]
     message: str
-    capabilities: dict[str, object]
+    capabilities: dict[str, object] = Field(default_factory=dict)
+    components: list[ConnectionTestComponent] = Field(default_factory=list)
 
 
 class ObjectStoreConnectionCreate(BaseModel):
@@ -124,12 +131,12 @@ class ComputeBackendRead(ComputeBackendCreate):
 class SecretReferenceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     provider: str = Field(min_length=1, max_length=80)
-    reference: str = Field(min_length=1, max_length=500)
+    reference: str = Field(min_length=1, max_length=2000)
 
 
 class SecretReferenceUpdate(BaseModel):
     provider: str | None = Field(default=None, min_length=1, max_length=80)
-    reference: str | None = Field(default=None, min_length=1, max_length=500)
+    reference: str | None = Field(default=None, min_length=1, max_length=2000)
 
 
 class SecretReferenceRead(BaseModel):

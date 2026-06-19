@@ -5,6 +5,7 @@ import type {
   BootstrapResponse,
   CatalogConnectionRead,
   ComputeBackendRead,
+  ConnectionTestResult,
   CleanupPreview,
   ClusteringAdvice,
   DashboardRead,
@@ -141,6 +142,8 @@ export const api = {
   ) => request<CatalogConnectionRead>("/api/v1/connections/catalogs", { method: "POST", body: JSON.stringify(body) }, token),
   deleteCatalogConnection: (token: string, connectionId: string) =>
     request<void>(`/api/v1/connections/catalogs/${connectionId}`, { method: "DELETE" }, token),
+  testCatalogConnection: (token: string, connectionId: string) =>
+    request<ConnectionTestResult>(`/api/v1/connections/catalogs/${connectionId}/test`, { method: "POST", body: JSON.stringify({}) }, token),
   createObjectStoreConnection: (
     token: string,
     body: {
@@ -153,9 +156,11 @@ export const api = {
       settings?: Record<string, unknown>;
     }
   ) =>
-    request<{ id: string }>("/api/v1/connections/object-stores", { method: "POST", body: JSON.stringify(body) }, token),
+    request<ObjectStoreConnectionRead>("/api/v1/connections/object-stores", { method: "POST", body: JSON.stringify(body) }, token),
   deleteObjectStoreConnection: (token: string, storeId: string) =>
     request<void>(`/api/v1/connections/object-stores/${storeId}`, { method: "DELETE" }, token),
+  testObjectStoreConnection: (token: string, storeId: string) =>
+    request<ConnectionTestResult>(`/api/v1/connections/object-stores/${storeId}/test`, { method: "POST", body: JSON.stringify({}) }, token),
   operations: (token: string) => request<OperationDescriptor[]>("/api/v1/operations/descriptors", {}, token),
   operationCategories: (token: string) =>
     request<OperationCategoryRead[]>("/api/v1/operations/descriptors/categories", {}, token),

@@ -338,6 +338,27 @@ def delete_object_store_connection(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/connections/object-stores/{store_id}/test", response_model=ConnectionTestResult)
+def test_object_store_connection(
+    store_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_permission("connections.manage")),
+) -> ConnectionTestResult:
+    service = ConnectionService(session)
+    store = service.get_object_store(current_user.workspace_id, store_id)
+    result = service.test_object_store(store)
+    AuditService(session).record(
+        action="connection.object_store.test",
+        resource_type="object_store_connection",
+        resource_id=store.id,
+        workspace_id=current_user.workspace_id,
+        actor_id=current_user.id,
+        after_state=result,
+    )
+    session.commit()
+    return ConnectionTestResult.model_validate(result)
+
+
 @router.post(
     "/connections/compute-backends",
     response_model=ComputeBackendRead,

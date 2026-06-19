@@ -40,7 +40,12 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
         headers=headers,
     )
     assert test.status_code == 200
-    assert test.json()["status"] == "ok"
+    assert test.json()["status"] in {"warning", "failed"}
+    assert {component["name"] for component in test.json()["components"]} >= {
+        "catalog metadata",
+        "catalog auth",
+        "catalog reachability",
+    }
 
     secret = client.post(
         "/api/v1/secrets/references",
@@ -59,11 +64,48 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
             "store_type": "s3",
             "region": "eu-central-1",
             "auth_ref": "catalog-role",
+            "settings": {
+                "warehouse": "s3://warehouse-a",
+                "storage_auth": {
+                    "mode": "static_key",
+                    "aws_access_key_id": "AKIAEXAMPLE",
+                    "aws_secret_access_key": "secret-value",
+                },
+            },
         },
         headers=headers,
     )
     assert store.status_code == 201, store.text
     store_id = store.json()["id"]
+    assert store.json()["settings"]["storage_auth"]["aws_secret_access_key_present"] is True
+    assert "aws_secret_access_key" not in store.json()["settings"]["storage_auth"]
+
+    local_store = client.post(
+        "/api/v1/connections/object-stores",
+        json={
+            "environment_id": env_id,
+            "name": "local-store",
+            "store_type": "local",
+            "settings": {
+                "warehouse": "/tmp/iceyard-warehouse",
+                "storage_auth": {"mode": "keyless"},
+            },
+        },
+        headers=headers,
+    )
+    assert local_store.status_code == 201, local_store.text
+    local_store_id = local_store.json()["id"]
+
+    store_test = client.post(
+        f"/api/v1/connections/object-stores/{local_store_id}/test",
+        headers=headers,
+    )
+    assert store_test.status_code == 200
+    assert {component["name"] for component in store_test.json()["components"]} >= {
+        "storage location",
+        "storage auth",
+        "storage reachability",
+    }
 
     backend = client.post(
         "/api/v1/connections/compute-backends",
@@ -91,6 +133,10 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
         f"/api/v1/connections/object-stores/{store_id}", headers=headers
     )
     assert deleted_store.status_code == 204
+    deleted_local_store = client.delete(
+        f"/api/v1/connections/object-stores/{local_store_id}", headers=headers
+    )
+    assert deleted_local_store.status_code == 204
     deleted_backend = client.delete(
         f"/api/v1/connections/compute-backends/{backend_id}", headers=headers
     )

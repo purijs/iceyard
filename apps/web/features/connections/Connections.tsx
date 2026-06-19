@@ -7,7 +7,14 @@ import { useMemo, useState } from "react";
 import { Badge, Button, Panel } from "@/components/ui";
 import type { ControlContext } from "@/app/page";
 import { api } from "@/lib/api";
-import type { CatalogConnectionRead, ComputeBackendRead, EnvironmentRead, ObjectStoreConnectionRead, TableRead } from "@/types/api";
+import type {
+  CatalogConnectionRead,
+  ComputeBackendRead,
+  ConnectionTestResult,
+  EnvironmentRead,
+  ObjectStoreConnectionRead,
+  TableRead
+} from "@/types/api";
 
 const CATALOGS = [
   ["rest", "REST", "Polaris - Unity - Lakekeeper - generic"],
@@ -27,10 +34,20 @@ const STORES = [
   ["local", "Local"]
 ] as const;
 
-const AUTHS = [
-  ["keyless", "Keyless", "IAM role - IRSA - Workload Identity"],
-  ["secret_ref", "Secret reference", "Vault - Secrets Manager - Key Vault"],
-  ["static_key", "Static key", "envelope-encrypted via KMS"]
+const CATALOG_AUTHS = [
+  ["none", "None / URI", "Embedded URI credentials or open dev catalog"],
+  ["basic", "Username + password", "JDBC, Hive, or basic REST auth"],
+  ["bearer", "Bearer token", "REST catalog token"],
+  ["oauth_client", "OAuth client", "client credentials flow"],
+  ["aws_iam", "AWS IAM", "Glue, S3 Tables, Lake Formation"],
+  ["secret_ref", "Secret reference", "Vault - Secrets Manager - Key Vault"]
+] as const;
+
+const STORAGE_AUTHS = [
+  ["credential_vending", "Catalog-vended", "REST/S3 Tables returns scoped storage credentials"],
+  ["keyless", "Keyless identity", "IAM role - IRSA - Workload Identity"],
+  ["static_key", "AWS access key", "access key id + secret access key"],
+  ["secret_ref", "Secret reference", "Vault - Secrets Manager - Key Vault"]
 ] as const;
 
 const CAPABILITY_PREVIEW: Record<string, { good: string[]; bad: string[]; note: string }> = {
@@ -73,7 +90,8 @@ const CAPABILITY_PREVIEW: Record<string, { good: string[]; bad: string[]; note: 
 
 type CatalogType = (typeof CATALOGS)[number][0];
 type StoreType = (typeof STORES)[number][0];
-type AuthType = (typeof AUTHS)[number][0];
+type CatalogAuthType = (typeof CATALOG_AUTHS)[number][0];
+type StorageAuthType = (typeof STORAGE_AUTHS)[number][0];
 
 type FormState = {
   envName: string;
@@ -87,12 +105,21 @@ type FormState = {
   accessStyle: "virtual-hosted" | "path-style";
   sse: "none" | "s3" | "kms" | "dsse-kms";
   kmsKeyArn: string;
-  credentialVending: boolean;
   remoteSigning: boolean;
-  auth: AuthType;
-  identity: string;
-  secretReference: string;
-  accessKeyId: string;
+  catalogAuth: CatalogAuthType;
+  catalogUsername: string;
+  catalogPassword: string;
+  catalogBearerToken: string;
+  catalogClientId: string;
+  catalogClientSecret: string;
+  catalogIdentity: string;
+  catalogSecretReference: string;
+  storageAuth: StorageAuthType;
+  storageIdentity: string;
+  storageSecretReference: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsSessionToken: string;
 };
 
 const DEFAULT_FORM: FormState = {
@@ -107,12 +134,21 @@ const DEFAULT_FORM: FormState = {
   accessStyle: "virtual-hosted",
   sse: "none",
   kmsKeyArn: "",
-  credentialVending: true,
   remoteSigning: false,
-  auth: "keyless",
-  identity: "",
-  secretReference: "",
-  accessKeyId: ""
+  catalogAuth: "none",
+  catalogUsername: "",
+  catalogPassword: "",
+  catalogBearerToken: "",
+  catalogClientId: "",
+  catalogClientSecret: "",
+  catalogIdentity: "",
+  catalogSecretReference: "",
+  storageAuth: "keyless",
+  storageIdentity: "",
+  storageSecretReference: "",
+  awsAccessKeyId: "",
+  awsSecretAccessKey: "",
+  awsSessionToken: ""
 };
 
 export function Connections({
@@ -136,6 +172,8 @@ export function Connections({
 }) {
   const [showWizard, setShowWizard] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [testingIds, setTestingIds] = useState<Set<string>>(() => new Set());
+  const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
   const tablesByEnvironment = useMemo(() => {
     const counts = new Map<string, number>();
     for (const table of tables) counts.set(table.environment_id, (counts.get(table.environment_id) ?? 0) + 1);
@@ -165,6 +203,41 @@ export function Connections({
       await onRefresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Unable to delete storage connection.");
+    }
+  }
+
+  async function testCatalog(connection: CatalogConnectionRead) {
+    setActionError(null);
+    setTestingIds((current) => new Set(current).add(connection.id));
+    try {
+      const result = await api.testCatalogConnection(token, connection.id);
+      setTestResults((current) => ({ ...current, [connection.id]: result }));
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to test connection.");
+    } finally {
+      setTestingIds((current) => {
+        const next = new Set(current);
+        next.delete(connection.id);
+        return next;
+      });
+    }
+  }
+
+  async function testObjectStore(store: ObjectStoreConnectionRead) {
+    setActionError(null);
+    setTestingIds((current) => new Set(current).add(store.id));
+    try {
+      const result = await api.testObjectStoreConnection(token, store.id);
+      setTestResults((current) => ({ ...current, [store.id]: result }));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to test storage connection.");
+    } finally {
+      setTestingIds((current) => {
+        const next = new Set(current);
+        next.delete(store.id);
+        return next;
+      });
     }
   }
 
@@ -215,6 +288,9 @@ export function Connections({
                           <span className="text-xs text-zinc-400">
                             {connection.last_tested_at ? `tested ${new Date(connection.last_tested_at).toLocaleTimeString()}` : "not tested"}
                           </span>
+                          <Button onClick={() => void testCatalog(connection)} disabled={testingIds.has(connection.id)}>
+                            {testingIds.has(connection.id) ? "Testing..." : "Test"}
+                          </Button>
                           <Button variant="danger" onClick={() => void deleteConnection(connection)}>
                             <Trash2 size={14} /> Delete
                           </Button>
@@ -243,6 +319,7 @@ export function Connections({
                         </div>
                       </div>
                       <p className="mt-3 text-xs text-zinc-400">{CAPABILITY_PREVIEW[connection.catalog_type]?.note ?? "Capabilities are driven by the connection probe."}</p>
+                      {testResults[connection.id] ? <ConnectionTestSummary result={testResults[connection.id]} /> : null}
                     </div>
                   ))}
                   {!envConnections.length ? <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-400">No catalog connections in this environment.</div> : null}
@@ -257,10 +334,16 @@ export function Connections({
                               <div className="truncate font-mono text-xs text-zinc-500">
                                 {store.store_type} · {String(store.settings.warehouse ?? store.endpoint ?? "no warehouse")}
                               </div>
+                              {testResults[store.id] ? <ConnectionTestSummary result={testResults[store.id]} compact /> : null}
                             </div>
-                            <Button variant="danger" onClick={() => void deleteObjectStore(store)}>
-                              <Trash2 size={14} /> Delete
-                            </Button>
+                            <div className="flex shrink-0 gap-2">
+                              <Button onClick={() => void testObjectStore(store)} disabled={testingIds.has(store.id)}>
+                                {testingIds.has(store.id) ? "Testing..." : "Test"}
+                              </Button>
+                              <Button variant="danger" onClick={() => void deleteObjectStore(store)}>
+                                <Trash2 size={14} /> Delete
+                              </Button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -359,6 +442,8 @@ function AddConnectionWizard({
   }));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const caps = CAPABILITY_PREVIEW[form.catalog];
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -368,10 +453,17 @@ function AddConnectionWizard({
   async function saveConnection() {
     setError(null);
     setMessage(null);
+    setTestResult(null);
     if (!form.envName || !form.name || !form.uri || !form.warehouse) {
       setError("Environment, connection name, catalog URI, and warehouse are required.");
       return;
     }
+    const validationError = credentialValidationError(form);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setSaving(true);
     try {
       let environment = environments.find((item) => item.name === form.envName);
       if (!environment) {
@@ -391,23 +483,24 @@ function AddConnectionWizard({
         store_type: form.store,
         endpoint: form.endpoint || undefined,
         region: form.region,
-        auth_ref: authRef(form) ?? undefined,
+        auth_ref: storageAuthRef(form) ?? undefined,
         settings: {
           warehouse: form.warehouse,
           access_style: form.accessStyle,
           server_side_encryption: form.sse,
           kms_key_arn: form.kmsKeyArn,
-          credential_vending: form.credentialVending,
-          remote_signing: form.remoteSigning
+          credential_vending: form.storageAuth === "credential_vending",
+          remote_signing: form.remoteSigning,
+          storage_auth: storageAuthSettings(form)
         }
       });
-      await api.createCatalogConnection(token, {
+      const catalogConnection = await api.createCatalogConnection(token, {
         environment_id: environment.id,
         name: form.name,
         catalog_type: form.catalog,
         endpoint: form.uri,
         warehouse: form.warehouse,
-        auth_ref: authRef(form),
+        auth_ref: catalogAuthRef(form),
         settings: {
           storage: form.store,
           region: form.region,
@@ -415,17 +508,24 @@ function AddConnectionWizard({
           access_style: form.accessStyle,
           server_side_encryption: form.sse,
           kms_key_arn: form.kmsKeyArn,
-          credential_vending: form.credentialVending,
+          credential_vending: form.storageAuth === "credential_vending",
           remote_signing: form.remoteSigning,
-          auth_mode: form.auth,
-          identity: form.auth === "keyless" ? form.identity : undefined,
+          catalog_auth: catalogAuthSettings(form),
           object_store_connection_id: objectStore.id
         }
       });
+      const result = await api.testCatalogConnection(token, catalogConnection.id);
+      setTestResult(result);
+      if (result.status === "failed") {
+        setError("Connection saved, but the test failed. Review the component results below.");
+      } else {
+        setMessage(result.message);
+      }
       await onRefresh();
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save connection.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -490,6 +590,42 @@ function AddConnectionWizard({
                 {catalogHelp(form.catalog)}
               </div>
             </div>
+            <div className="space-y-3 rounded-md border border-zinc-200 p-3">
+              <div>
+                <div className="text-sm font-medium text-zinc-900">Catalog authentication</div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Used for the REST/Hive/Glue/Nessie/S3 Tables endpoint or the JDBC metadata database. Storage credentials are configured separately.
+                </p>
+              </div>
+              <div className="grid gap-2 md:grid-cols-3">
+                {CATALOG_AUTHS.map(([value, label, sub]) => (
+                  <Choice key={value} active={form.catalogAuth === value} label={label} sub={sub} onClick={() => set("catalogAuth", value)} />
+                ))}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {form.catalogAuth === "basic" ? (
+                  <>
+                    <Field label="username" value={form.catalogUsername} onChange={(value) => set("catalogUsername", value)} />
+                    <PasswordField label="password" value={form.catalogPassword} onChange={(value) => set("catalogPassword", value)} />
+                  </>
+                ) : null}
+                {form.catalogAuth === "bearer" ? (
+                  <PasswordField label="bearer token" value={form.catalogBearerToken} onChange={(value) => set("catalogBearerToken", value)} />
+                ) : null}
+                {form.catalogAuth === "oauth_client" ? (
+                  <>
+                    <Field label="client id" value={form.catalogClientId} onChange={(value) => set("catalogClientId", value)} />
+                    <PasswordField label="client secret" value={form.catalogClientSecret} onChange={(value) => set("catalogClientSecret", value)} />
+                  </>
+                ) : null}
+                {form.catalogAuth === "aws_iam" ? (
+                  <Field label="role ARN / identity" value={form.catalogIdentity} onChange={(value) => set("catalogIdentity", value)} placeholder="optional if using runtime identity" />
+                ) : null}
+                {form.catalogAuth === "secret_ref" ? (
+                  <Field label="secret reference" value={form.catalogSecretReference} onChange={(value) => set("catalogSecretReference", value)} placeholder="vault/path, secret ARN, or key vault id" />
+                ) : null}
+              </div>
+            </div>
           </section>
 
           <section className="space-y-3">
@@ -530,41 +666,42 @@ function AddConnectionWizard({
                 />
                 <Field label="kms key ARN" value={form.kmsKeyArn} onChange={(value) => set("kmsKeyArn", value)} />
                 <label className="flex items-center gap-2 text-sm text-zinc-600">
-                  <input type="checkbox" checked={form.credentialVending} onChange={(event) => set("credentialVending", event.target.checked)} />
-                  Use catalog credential vending
-                </label>
-                <label className="flex items-center gap-2 text-sm text-zinc-600">
                   <input type="checkbox" checked={form.remoteSigning} onChange={(event) => set("remoteSigning", event.target.checked)} />
                   Enable remote request signing
                 </label>
               </div>
             ) : null}
-          </section>
-
-          <section className="space-y-3">
-            <div>
-              <Eyebrow>Authentication & secrets</Eyebrow>
-              <p className="mt-1 text-sm text-zinc-500">
-                Prefer keyless identities or secret references. Static keys are supported for local/dev only and are never returned by API responses.
-              </p>
-            </div>
-            <div className="grid gap-2 md:grid-cols-3">
-              {AUTHS.map(([value, label, sub]) => (
-                <Choice key={value} active={form.auth === value} label={label} sub={sub} onClick={() => set("auth", value)} />
-              ))}
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {form.auth === "keyless" ? <Field label="role ARN / identity" value={form.identity} onChange={(value) => set("identity", value)} /> : null}
-              {form.auth === "secret_ref" ? <Field label="secret reference" value={form.secretReference} onChange={(value) => set("secretReference", value)} /> : null}
-              {form.auth === "static_key" ? <Field label="access key id" value={form.accessKeyId} onChange={(value) => set("accessKeyId", value)} /> : null}
-            </div>
-            <div className="flex items-start gap-2 rounded-md bg-zinc-50 p-3 text-xs text-zinc-500">
-              <Lock size={14} className="mt-0.5 shrink-0" />
-              {form.auth === "keyless"
-                ? "No secret is stored. The connection assumes an identity at runtime."
-                : form.auth === "secret_ref"
-                  ? "Only the reference is stored. The secret stays in the external secret manager."
-                  : "Static keys must be wrapped before save and are never returned by the API."}
+            <div className="space-y-3 rounded-md border border-zinc-200 p-3">
+              <div>
+                <div className="text-sm font-medium text-zinc-900">Storage authentication</div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Used by the manifest and data-file storage client. Static secrets are accepted once, moved to secret references, and never returned by the API.
+                </p>
+              </div>
+              <div className="grid gap-2 md:grid-cols-4">
+                {STORAGE_AUTHS.map(([value, label, sub]) => (
+                  <Choice key={value} active={form.storageAuth === value} label={label} sub={sub} onClick={() => set("storageAuth", value)} />
+                ))}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {form.storageAuth === "keyless" ? (
+                  <Field label="role ARN / identity" value={form.storageIdentity} onChange={(value) => set("storageIdentity", value)} placeholder="optional if using runtime identity" />
+                ) : null}
+                {form.storageAuth === "secret_ref" ? (
+                  <Field label="secret reference" value={form.storageSecretReference} onChange={(value) => set("storageSecretReference", value)} placeholder="vault/path, secret ARN, or key vault id" />
+                ) : null}
+                {form.storageAuth === "static_key" ? (
+                  <>
+                    <Field label="AWS access key id" value={form.awsAccessKeyId} onChange={(value) => set("awsAccessKeyId", value)} />
+                    <PasswordField label="AWS secret access key" value={form.awsSecretAccessKey} onChange={(value) => set("awsSecretAccessKey", value)} />
+                    <PasswordField label="AWS session token (optional)" value={form.awsSessionToken} onChange={(value) => set("awsSessionToken", value)} />
+                  </>
+                ) : null}
+              </div>
+              <div className="flex items-start gap-2 rounded-md bg-zinc-50 p-3 text-xs text-zinc-500">
+                <Lock size={14} className="mt-0.5 shrink-0" />
+                {storageAuthNote(form.storageAuth)}
+              </div>
             </div>
           </section>
 
@@ -587,14 +724,15 @@ function AddConnectionWizard({
 
           {error ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
           {message ? <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{message}</div> : null}
+          {testResult ? <ConnectionTestSummary result={testResult} /> : null}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50 px-5 py-3">
-          <span className="text-xs text-zinc-400">Saving creates a catalog connection and a linked storage reference, then writes audit events.</span>
+          <span className="text-xs text-zinc-400">Saving creates the catalog and storage references, then tests the saved configuration.</span>
           <div className="flex gap-2">
-            <Button onClick={() => setMessage("Form looks complete. Live catalog probing runs after save.")}>Validate locally</Button>
-            <Button variant="primary" onClick={saveConnection}>
-              Save connection
+            <Button onClick={onClose}>{testResult ? "Close" : "Cancel"}</Button>
+            <Button variant="primary" onClick={saveConnection} disabled={saving}>
+              {saving ? "Saving & testing..." : "Save & test connection"}
             </Button>
           </div>
         </div>
@@ -625,6 +763,32 @@ function ConnectionRow({
   );
 }
 
+function ConnectionTestSummary({ result, compact = false }: { result: ConnectionTestResult; compact?: boolean }) {
+  return (
+    <div className={`${compact ? "mt-2" : "mt-4"} rounded-md border border-zinc-200 bg-white p-3`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-zinc-900">Connection test</span>
+        <Badge tone={testTone(result.status)}>{result.status}</Badge>
+      </div>
+      {!compact ? <p className="mb-3 text-xs text-zinc-500">{result.message}</p> : null}
+      <div className="space-y-2">
+        {result.components.map((component) => (
+          <div key={`${component.name}-${component.message}`} className="flex items-start justify-between gap-3 text-xs">
+            <span className="font-medium text-zinc-700">{component.name}</span>
+            <span className="max-w-[70%] text-right text-zinc-500">{component.message}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function testTone(status: ConnectionTestResult["status"]) {
+  if (status === "ok") return "healthy";
+  if (status === "warning") return "warning";
+  return "critical";
+}
+
 function Field({
   label,
   value,
@@ -648,6 +812,32 @@ function Field({
         placeholder={placeholder}
       />
       {hint ? <span className="mt-1 block text-xs text-zinc-400">{hint}</span> : null}
+    </label>
+  );
+}
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  placeholder
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block font-mono text-xs text-zinc-500">{label}</span>
+      <input
+        type="password"
+        className="w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-sm outline-none placeholder:text-zinc-300 focus:border-zinc-500"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
     </label>
   );
 }
@@ -718,10 +908,92 @@ function Eyebrow({ children }: { children: ReactNode }) {
   return <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">{children}</div>;
 }
 
-function authRef(form: FormState) {
-  if (form.auth === "keyless") return form.identity;
-  if (form.auth === "secret_ref") return form.secretReference;
-  return form.accessKeyId ? `static:${form.accessKeyId}` : null;
+function catalogAuthSettings(form: FormState): Record<string, unknown> {
+  if (form.catalogAuth === "basic") {
+    return {
+      mode: form.catalogAuth,
+      username: form.catalogUsername,
+      password: form.catalogPassword
+    };
+  }
+  if (form.catalogAuth === "bearer") {
+    return { mode: form.catalogAuth, bearer_token: form.catalogBearerToken };
+  }
+  if (form.catalogAuth === "oauth_client") {
+    return {
+      mode: form.catalogAuth,
+      client_id: form.catalogClientId,
+      client_secret: form.catalogClientSecret
+    };
+  }
+  if (form.catalogAuth === "aws_iam") {
+    return { mode: form.catalogAuth, identity: form.catalogIdentity };
+  }
+  if (form.catalogAuth === "secret_ref") {
+    return { mode: form.catalogAuth, secret_reference: form.catalogSecretReference };
+  }
+  return { mode: "none" };
+}
+
+function storageAuthSettings(form: FormState): Record<string, unknown> {
+  if (form.storageAuth === "static_key") {
+    return {
+      mode: form.storageAuth,
+      aws_access_key_id: form.awsAccessKeyId,
+      aws_secret_access_key: form.awsSecretAccessKey,
+      aws_session_token: form.awsSessionToken || undefined
+    };
+  }
+  if (form.storageAuth === "secret_ref") {
+    return { mode: form.storageAuth, secret_reference: form.storageSecretReference };
+  }
+  if (form.storageAuth === "keyless") {
+    return { mode: form.storageAuth, identity: form.storageIdentity };
+  }
+  return { mode: "credential_vending" };
+}
+
+function catalogAuthRef(form: FormState) {
+  return form.catalogAuth === "secret_ref" && form.catalogSecretReference ? form.catalogSecretReference : null;
+}
+
+function storageAuthRef(form: FormState) {
+  return form.storageAuth === "secret_ref" && form.storageSecretReference ? form.storageSecretReference : null;
+}
+
+function credentialValidationError(form: FormState) {
+  if (form.catalogAuth === "basic" && (!form.catalogUsername || !form.catalogPassword)) {
+    return "Catalog username and password are required.";
+  }
+  if (form.catalogAuth === "bearer" && !form.catalogBearerToken) {
+    return "Catalog bearer token is required.";
+  }
+  if (form.catalogAuth === "oauth_client" && (!form.catalogClientId || !form.catalogClientSecret)) {
+    return "Catalog OAuth client id and client secret are required.";
+  }
+  if (form.catalogAuth === "secret_ref" && !form.catalogSecretReference) {
+    return "Catalog secret reference is required.";
+  }
+  if (form.storageAuth === "static_key" && (!form.awsAccessKeyId || !form.awsSecretAccessKey)) {
+    return "AWS access key id and secret access key are required.";
+  }
+  if (form.storageAuth === "secret_ref" && !form.storageSecretReference) {
+    return "Storage secret reference is required.";
+  }
+  return null;
+}
+
+function storageAuthNote(auth: StorageAuthType) {
+  if (auth === "credential_vending") {
+    return "No storage secret is stored here. The selected catalog is expected to vend scoped credentials at runtime.";
+  }
+  if (auth === "keyless") {
+    return "No secret is stored. The worker uses the configured identity or the runtime credential chain.";
+  }
+  if (auth === "secret_ref") {
+    return "Only the external reference is stored. Secret material stays in your secret manager.";
+  }
+  return "The secret access key is accepted once, stored as a secret reference, and never returned by API responses.";
 }
 
 function catalogUriLabel(catalog: CatalogType) {

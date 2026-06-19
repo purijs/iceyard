@@ -139,7 +139,7 @@ class SecretReference(Base):
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider: Mapped[str] = mapped_column(String(80), nullable=False)
-    reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    reference: Mapped[str] = mapped_column(String(2000), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     @property
