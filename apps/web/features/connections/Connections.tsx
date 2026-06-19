@@ -1130,30 +1130,30 @@ function catalogAuthSettings(form: FormState): Record<string, unknown> {
   if (form.catalogAuth === "basic") {
     const settings: Record<string, unknown> = {
       mode: form.catalogAuth,
-      username: form.catalogUsername
+      username: form.catalogUsername.trim()
     };
-    if (form.catalogPassword) settings.password = form.catalogPassword;
+    if (form.catalogPassword.trim()) settings.password = form.catalogPassword.trim();
     return settings;
   }
   if (form.catalogAuth === "bearer") {
     return {
       mode: form.catalogAuth,
-      ...(form.catalogBearerToken ? { bearer_token: form.catalogBearerToken } : {})
+      ...(form.catalogBearerToken.trim() ? { bearer_token: form.catalogBearerToken.trim() } : {})
     };
   }
   if (form.catalogAuth === "oauth_client") {
     const settings: Record<string, unknown> = {
       mode: form.catalogAuth,
-      client_id: form.catalogClientId
+      client_id: form.catalogClientId.trim()
     };
-    if (form.catalogClientSecret) settings.client_secret = form.catalogClientSecret;
+    if (form.catalogClientSecret.trim()) settings.client_secret = form.catalogClientSecret.trim();
     return settings;
   }
   if (form.catalogAuth === "aws_iam") {
-    return { mode: form.catalogAuth, identity: form.catalogIdentity };
+    return { mode: form.catalogAuth, identity: form.catalogIdentity.trim() };
   }
   if (form.catalogAuth === "secret_ref") {
-    return { mode: form.catalogAuth, secret_reference: form.catalogSecretReference };
+    return { mode: form.catalogAuth, secret_reference: form.catalogSecretReference.trim() };
   }
   return { mode: "none" };
 }
@@ -1171,17 +1171,19 @@ function storageAuthSettings(form: FormState): Record<string, unknown> {
   if (form.storageAuth === "static_key") {
     const settings: Record<string, unknown> = {
       mode: form.storageAuth,
-      aws_access_key_id: form.awsAccessKeyId
+      aws_access_key_id: form.awsAccessKeyId.trim()
     };
-    if (form.awsSecretAccessKey) settings.aws_secret_access_key = form.awsSecretAccessKey;
-    if (form.awsSessionToken) settings.aws_session_token = form.awsSessionToken;
+    if (form.awsSecretAccessKey.trim()) {
+      settings.aws_secret_access_key = form.awsSecretAccessKey.trim();
+    }
+    if (form.awsSessionToken.trim()) settings.aws_session_token = form.awsSessionToken.trim();
     return settings;
   }
   if (form.storageAuth === "secret_ref") {
-    return { mode: form.storageAuth, secret_reference: form.storageSecretReference };
+    return { mode: form.storageAuth, secret_reference: form.storageSecretReference.trim() };
   }
   if (form.storageAuth === "keyless") {
-    return { mode: form.storageAuth, identity: form.storageIdentity };
+    return { mode: form.storageAuth, identity: form.storageIdentity.trim() };
   }
   return { mode: "credential_vending" };
 }

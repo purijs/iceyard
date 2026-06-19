@@ -240,8 +240,8 @@ class ConnectionService:
         secret_payload: dict[str, str] = {}
         for field in SECRET_AUTH_FIELDS:
             value = auth_clean.pop(field, None)
-            if isinstance(value, str) and value:
-                secret_payload[field] = value
+            if isinstance(value, str) and value.strip():
+                secret_payload[field] = value.strip()
                 auth_clean[f"{field}_present"] = True
 
         secret_id: str | None = None
@@ -818,6 +818,10 @@ class ConnectionService:
                         cert_file.write(root_cert)
                         root_cert_path = cert_file.name
                     connect_kwargs["sslrootcert"] = root_cert_path
+                elif sslmode == "require":
+                    connect_kwargs["sslrootcert"] = os.path.join(
+                        tempfile.gettempdir(), "iceyard-no-postgres-root-ca.pem"
+                    )
 
                 with psycopg.connect(
                     uri,

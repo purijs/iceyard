@@ -1,4 +1,12 @@
+import json
+import sys
+import types
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from iceyard_api.db.models import CatalogConnection, SecretReference
+from iceyard_api.db.session import SessionLocal
 
 
 def test_connection_lifecycle(client: TestClient, token: str) -> None:
@@ -179,3 +187,98 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
         "connection.compute.create",
         "environment.delete",
     } <= actions
+
+
+def test_catalog_connection_trims_inline_secret_values(
+    client: TestClient, token: str
+) -> None:
+    headers = {"Authorization": f"Bearer {token}"}
+    env = client.post(
+        "/api/v1/environments",
+        json={"name": "tls-dev", "kind": "dev", "region": "eu-central-1"},
+        headers=headers,
+    )
+    assert env.status_code == 201, env.text
+
+    response = client.post(
+        "/api/v1/connections/catalogs",
+        json={
+            "environment_id": env.json()["id"],
+            "name": "catalog-with-secret",
+            "catalog_type": "jdbc",
+            "endpoint": "jdbc:postgresql://database.internal:5432/iceberg_catalog",
+            "settings": {
+                "catalog_auth": {
+                    "mode": "basic",
+                    "username": "postgres",
+                    "password": " copied-password \n",
+                }
+            },
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+
+    with SessionLocal() as session:
+        connection = session.scalar(
+            select(CatalogConnection).where(CatalogConnection.name == "catalog-with-secret")
+        )
+        assert connection is not None
+        secret = session.scalar(
+            select(SecretReference).where(SecretReference.id == connection.auth_ref)
+        )
+        assert secret is not None
+        assert json.loads(secret.reference)["password"] == "copied-password"
+
+
+def test_jdbc_require_ssl_does_not_use_default_postgres_root_cert(
+    client: TestClient, token: str, monkeypatch
+) -> None:
+    headers = {"Authorization": f"Bearer {token}"}
+    env = client.post(
+        "/api/v1/environments",
+        json={"name": "tls-prod", "kind": "prod", "region": "eu-central-1"},
+        headers=headers,
+    )
+    assert env.status_code == 201, env.text
+    response = client.post(
+        "/api/v1/connections/catalogs",
+        json={
+            "environment_id": env.json()["id"],
+            "name": "catalog-tls",
+            "catalog_type": "jdbc",
+            "endpoint": "jdbc:postgresql://database.internal:5432/iceberg_catalog",
+            "settings": {
+                "catalog_auth": {
+                    "mode": "basic",
+                    "username": "postgres",
+                    "password": "secret",
+                },
+                "jdbc_options": {"sslmode": "require"},
+            },
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    captured: dict[str, object] = {}
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_connect(_uri: str, **kwargs):
+        captured.update(kwargs)
+        return FakeConnection()
+
+    monkeypatch.setitem(sys.modules, "psycopg", types.SimpleNamespace(connect=fake_connect))
+    test = client.post(
+        f"/api/v1/connections/catalogs/{response.json()['id']}/test",
+        headers=headers,
+    )
+
+    assert test.status_code == 200
+    assert captured["sslmode"] == "require"
+    assert str(captured["sslrootcert"]).endswith("iceyard-no-postgres-root-ca.pem")
