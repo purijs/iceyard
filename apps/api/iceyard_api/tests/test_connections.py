@@ -26,6 +26,27 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
     connection_id = connection.json()["id"]
     assert connection.json()["capabilities"]["supports_credential_vending"] is True
 
+    jdbc_connection = client.post(
+        "/api/v1/connections/catalogs",
+        json={
+            "environment_id": env_id,
+            "name": "catalog-jdbc",
+            "catalog_type": "jdbc",
+            "endpoint": "jdbc:postgresql://database.internal:5432/iceberg_catalog",
+            "warehouse": "s3://warehouse-a",
+            "settings": {
+                "jdbc_options": {
+                    "sslmode": "require",
+                    "application_name": "iceyard",
+                }
+            },
+        },
+        headers=headers,
+    )
+    assert jdbc_connection.status_code == 201, jdbc_connection.text
+    jdbc_connection_id = jdbc_connection.json()["id"]
+    assert jdbc_connection.json()["settings"]["jdbc_options"]["sslmode"] == "require"
+
     updated = client.patch(
         f"/api/v1/connections/catalogs/{connection_id}",
         json={"name": "dev-rest", "is_enabled": False},
@@ -129,6 +150,10 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
         f"/api/v1/connections/catalogs/{connection_id}", headers=headers
     )
     assert deleted_catalog.status_code == 204
+    deleted_jdbc_catalog = client.delete(
+        f"/api/v1/connections/catalogs/{jdbc_connection_id}", headers=headers
+    )
+    assert deleted_jdbc_catalog.status_code == 204
     deleted_store = client.delete(
         f"/api/v1/connections/object-stores/{store_id}", headers=headers
     )

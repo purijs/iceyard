@@ -92,6 +92,7 @@ type CatalogType = (typeof CATALOGS)[number][0];
 type StoreType = (typeof STORES)[number][0];
 type CatalogAuthType = (typeof CATALOG_AUTHS)[number][0];
 type StorageAuthType = (typeof STORAGE_AUTHS)[number][0];
+type JdbcSslMode = "disable" | "allow" | "prefer" | "require" | "verify-ca" | "verify-full";
 
 type FormState = {
   envName: string;
@@ -114,6 +115,9 @@ type FormState = {
   catalogClientSecret: string;
   catalogIdentity: string;
   catalogSecretReference: string;
+  jdbcSslMode: JdbcSslMode;
+  jdbcSslRootCert: string;
+  jdbcApplicationName: string;
   storageAuth: StorageAuthType;
   storageIdentity: string;
   storageSecretReference: string;
@@ -143,6 +147,9 @@ const DEFAULT_FORM: FormState = {
   catalogClientSecret: "",
   catalogIdentity: "",
   catalogSecretReference: "",
+  jdbcSslMode: "prefer",
+  jdbcSslRootCert: "",
+  jdbcApplicationName: "iceyard",
   storageAuth: "keyless",
   storageIdentity: "",
   storageSecretReference: "",
@@ -510,6 +517,7 @@ function AddConnectionWizard({
           kms_key_arn: form.kmsKeyArn,
           credential_vending: form.storageAuth === "credential_vending",
           remote_signing: form.remoteSigning,
+          jdbc_options: jdbcOptions(form),
           catalog_auth: catalogAuthSettings(form),
           object_store_connection_id: objectStore.id
         }
@@ -590,6 +598,44 @@ function AddConnectionWizard({
                 {catalogHelp(form.catalog)}
               </div>
             </div>
+            {form.catalog === "jdbc" ? (
+              <div className="space-y-3 rounded-md border border-zinc-200 p-3">
+                <div>
+                  <div className="text-sm font-medium text-zinc-900">JDBC TLS</div>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    PostgreSQL catalogs often require SSL in pg_hba.conf. Use require to force TLS, or verify-ca/verify-full with a root CA certificate.
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Segmented
+                    label="sslmode"
+                    value={form.jdbcSslMode}
+                    items={[
+                      ["prefer", "prefer"],
+                      ["require", "require"],
+                      ["verify-ca", "verify-ca"],
+                      ["verify-full", "verify-full"],
+                      ["disable", "disable"]
+                    ]}
+                    onChange={(value) => set("jdbcSslMode", value as JdbcSslMode)}
+                  />
+                  <Field
+                    label="application name"
+                    value={form.jdbcApplicationName}
+                    onChange={(value) => set("jdbcApplicationName", value)}
+                    placeholder="iceyard"
+                  />
+                </div>
+                {form.jdbcSslMode === "verify-ca" || form.jdbcSslMode === "verify-full" ? (
+                  <TextArea
+                    label="root CA certificate PEM"
+                    value={form.jdbcSslRootCert}
+                    onChange={(value) => set("jdbcSslRootCert", value)}
+                    placeholder="-----BEGIN CERTIFICATE-----"
+                  />
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-3 rounded-md border border-zinc-200 p-3">
               <div>
                 <div className="text-sm font-medium text-zinc-900">Catalog authentication</div>
@@ -842,6 +888,31 @@ function PasswordField({
   );
 }
 
+function TextArea({
+  label,
+  value,
+  onChange,
+  placeholder
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block font-mono text-xs text-zinc-500">{label}</span>
+      <textarea
+        className="min-h-32 w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-sm outline-none placeholder:text-zinc-300 focus:border-zinc-500"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+      />
+    </label>
+  );
+}
+
 function SetupStep({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
@@ -935,6 +1006,15 @@ function catalogAuthSettings(form: FormState): Record<string, unknown> {
   return { mode: "none" };
 }
 
+function jdbcOptions(form: FormState): Record<string, unknown> | undefined {
+  if (form.catalog !== "jdbc") return undefined;
+  return {
+    sslmode: form.jdbcSslMode,
+    ssl_root_cert: form.jdbcSslRootCert || undefined,
+    application_name: form.jdbcApplicationName || "iceyard"
+  };
+}
+
 function storageAuthSettings(form: FormState): Record<string, unknown> {
   if (form.storageAuth === "static_key") {
     return {
@@ -973,6 +1053,13 @@ function credentialValidationError(form: FormState) {
   }
   if (form.catalogAuth === "secret_ref" && !form.catalogSecretReference) {
     return "Catalog secret reference is required.";
+  }
+  if (
+    form.catalog === "jdbc" &&
+    (form.jdbcSslMode === "verify-ca" || form.jdbcSslMode === "verify-full") &&
+    !form.jdbcSslRootCert.trim()
+  ) {
+    return "JDBC verify-ca and verify-full require the database root CA certificate.";
   }
   if (form.storageAuth === "static_key" && (!form.awsAccessKeyId || !form.awsSecretAccessKey)) {
     return "AWS access key id and secret access key are required.";

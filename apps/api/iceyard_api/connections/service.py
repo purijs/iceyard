@@ -1,5 +1,8 @@
 import json
+import os
 import re
+import tempfile
+from contextlib import suppress
 from typing import Any
 from urllib.parse import urlparse
 
@@ -745,15 +748,40 @@ class ConnectionService:
         )
         username = auth_settings.get("username")
         password = secret.get("password")
+        jdbc_options = settings.get("jdbc_options")
+        jdbc_settings = jdbc_options if isinstance(jdbc_options, dict) else {}
         if uri.startswith("postgresql://") or uri.startswith("postgres://"):
+            root_cert_path: str | None = None
             try:
                 import psycopg
 
+                connect_kwargs: dict[str, object] = {"connect_timeout": 5}
+                if username:
+                    connect_kwargs["user"] = str(username)
+                if password:
+                    connect_kwargs["password"] = password
+                sslmode = jdbc_settings.get("sslmode")
+                if isinstance(sslmode, str) and sslmode:
+                    connect_kwargs["sslmode"] = sslmode
+                application_name = jdbc_settings.get("application_name")
+                if isinstance(application_name, str) and application_name:
+                    connect_kwargs["application_name"] = application_name
+                root_cert = jdbc_settings.get("ssl_root_cert")
+                if isinstance(root_cert, str) and root_cert.strip():
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        encoding="utf-8",
+                        prefix="iceyard-pg-ca-",
+                        suffix=".pem",
+                        delete=False,
+                    ) as cert_file:
+                        cert_file.write(root_cert)
+                        root_cert_path = cert_file.name
+                    connect_kwargs["sslrootcert"] = root_cert_path
+
                 with psycopg.connect(
                     uri,
-                    user=str(username) if username else None,
-                    password=password or None,
-                    connect_timeout=5,
+                    **connect_kwargs,
                 ):
                     return self._component(
                         "catalog reachability",
@@ -766,6 +794,10 @@ class ConnectionService:
                     "failed",
                     f"PostgreSQL probe failed: {exc}.",
                 )
+            finally:
+                if root_cert_path:
+                    with suppress(OSError):
+                        os.unlink(root_cert_path)
         if uri.startswith("mysql://"):
             return self._component(
                 "catalog reachability",
