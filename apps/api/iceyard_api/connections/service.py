@@ -7,10 +7,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from iceyard_api.core.config import get_settings
 from iceyard_api.core.time import utcnow
 from iceyard_api.db.models import (
     CatalogConnection,
@@ -154,15 +156,35 @@ class ConnectionService:
         purpose: str,
         value: dict[str, str],
     ) -> SecretReference:
+        encoded_reference = self._encode_inline_secret(value)
         secret = SecretReference(
             workspace_id=workspace_id,
             name=self._unique_secret_name(workspace_id, resource_name, purpose),
             provider="inline",
-            reference=json.dumps(value, sort_keys=True, separators=(",", ":")),
+            reference=encoded_reference,
         )
         self.session.add(secret)
         self.session.flush()
         return secret
+
+    def _secret_fernet(self) -> Fernet | None:
+        key = get_settings().secret_encryption_key
+        return Fernet(key.encode("utf-8")) if key else None
+
+    def _encode_inline_secret(self, value: dict[str, str]) -> str:
+        payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        fernet = self._secret_fernet()
+        if fernet:
+            return f"fernet:v1:{fernet.encrypt(payload).decode('utf-8')}"
+        if get_settings().environment == "production":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "ICEYARD_SECRET_ENCRYPTION_KEY is required before inline "
+                    "connection secrets can be stored in production."
+                ),
+            )
+        return payload.decode("utf-8")
 
     def _read_inline_secret(self, workspace_id: str, secret_id: str | None) -> dict[str, str]:
         if not secret_id:
@@ -176,8 +198,25 @@ class ConnectionService:
         )
         if not secret:
             return {}
+        reference = secret.reference
+        if reference.startswith("fernet:v1:"):
+            fernet = self._secret_fernet()
+            if not fernet:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="ICEYARD_SECRET_ENCRYPTION_KEY is required to read this secret.",
+                )
+            try:
+                reference = fernet.decrypt(reference.removeprefix("fernet:v1:").encode()).decode(
+                    "utf-8"
+                )
+            except InvalidToken as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Stored connection secret could not be decrypted.",
+                ) from exc
         try:
-            loaded = json.loads(secret.reference)
+            loaded = json.loads(reference)
         except json.JSONDecodeError:
             return {}
         if not isinstance(loaded, dict):
@@ -234,7 +273,7 @@ class ConnectionService:
             settings=settings,
             section=section,
         )
-        return clean, auth_ref or inline_secret_id
+        return clean, inline_secret_id or auth_ref
 
     def create_environment(
         self,
@@ -380,19 +419,20 @@ class ConnectionService:
             connection.catalog_type = catalog_type
             connection.capabilities = capabilities_for_catalog(catalog_type)
         for field in ("endpoint", "warehouse", "auth_ref", "settings", "is_enabled"):
-            if field in values and values[field] is not None:
-                if field == "settings":
-                    settings, auth_ref = self._sanitize_connection_settings(
-                        workspace_id=workspace_id,
-                        resource_name=connection.name,
-                        settings=values[field],
-                        section="catalog_auth",
-                        auth_ref=connection.auth_ref,
-                    )
-                    connection.settings = settings
-                    connection.auth_ref = auth_ref
-                else:
-                    setattr(connection, field, values[field])
+            if field not in values:
+                continue
+            if field == "settings" and values[field] is not None:
+                settings, auth_ref = self._sanitize_connection_settings(
+                    workspace_id=workspace_id,
+                    resource_name=connection.name,
+                    settings=values[field],
+                    section="catalog_auth",
+                    auth_ref=connection.auth_ref,
+                )
+                connection.settings = settings
+                connection.auth_ref = auth_ref
+            elif field != "settings":
+                setattr(connection, field, values[field])
         self.session.flush()
         return connection
 
@@ -1074,19 +1114,20 @@ class ConnectionService:
             )
             store.name = name
         for field in ("store_type", "endpoint", "region", "auth_ref", "settings"):
-            if field in values and values[field] is not None:
-                if field == "settings":
-                    settings, auth_ref = self._sanitize_connection_settings(
-                        workspace_id=workspace_id,
-                        resource_name=store.name,
-                        settings=values[field],
-                        section="storage_auth",
-                        auth_ref=store.auth_ref,
-                    )
-                    store.settings = settings
-                    store.auth_ref = auth_ref
-                else:
-                    setattr(store, field, values[field])
+            if field not in values:
+                continue
+            if field == "settings" and values[field] is not None:
+                settings, auth_ref = self._sanitize_connection_settings(
+                    workspace_id=workspace_id,
+                    resource_name=store.name,
+                    settings=values[field],
+                    section="storage_auth",
+                    auth_ref=store.auth_ref,
+                )
+                store.settings = settings
+                store.auth_ref = auth_ref
+            elif field != "settings":
+                setattr(store, field, values[field])
         self.session.flush()
         return store
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, HardDrive, Lock, Plus, Server, Trash2, X } from "lucide-react";
+import { Database, HardDrive, Lock, Pencil, Plus, Server, Trash2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
@@ -178,6 +178,7 @@ export function Connections({
   onRefresh: () => Promise<void>;
 }) {
   const [showWizard, setShowWizard] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<CatalogConnectionRead | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [testingIds, setTestingIds] = useState<Set<string>>(() => new Set());
   const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
@@ -298,6 +299,9 @@ export function Connections({
                           <Button onClick={() => void testCatalog(connection)} disabled={testingIds.has(connection.id)}>
                             {testingIds.has(connection.id) ? "Testing..." : "Test"}
                           </Button>
+                          <Button onClick={() => setEditingConnection(connection)}>
+                            <Pencil size={14} /> Edit
+                          </Button>
                           <Button variant="danger" onClick={() => void deleteConnection(connection)}>
                             <Trash2 size={14} /> Delete
                           </Button>
@@ -364,7 +368,24 @@ export function Connections({
         })}
       </div>
 
-      {showWizard ? <AddConnectionWizard token={token} environments={environments} onClose={() => setShowWizard(false)} onRefresh={onRefresh} /> : null}
+      {showWizard ? (
+        <AddConnectionWizard
+          token={token}
+          environments={environments}
+          onClose={() => setShowWizard(false)}
+          onRefresh={onRefresh}
+        />
+      ) : null}
+      {editingConnection ? (
+        <AddConnectionWizard
+          token={token}
+          environments={environments}
+          initialConnection={editingConnection}
+          initialObjectStore={linkedStoreForConnection(editingConnection, objectStores)}
+          onClose={() => setEditingConnection(null)}
+          onRefresh={onRefresh}
+        />
+      ) : null}
     </div>
   );
 }
@@ -435,23 +456,27 @@ function RuntimeRow({
 function AddConnectionWizard({
   token,
   environments,
+  initialConnection,
+  initialObjectStore,
   onClose,
   onRefresh
 }: {
   token: string;
   environments: EnvironmentRead[];
+  initialConnection?: CatalogConnectionRead;
+  initialObjectStore?: ObjectStoreConnectionRead | null;
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
   const [form, setForm] = useState<FormState>(() => ({
-    ...DEFAULT_FORM,
-    envName: environments[0]?.name ?? ""
+    ...formFromConnection(initialConnection, initialObjectStore, environments)
   }));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const caps = CAPABILITY_PREVIEW[form.catalog];
+  const isEditing = Boolean(initialConnection);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -465,7 +490,7 @@ function AddConnectionWizard({
       setError("Environment, connection name, catalog URI, and warehouse are required.");
       return;
     }
-    const validationError = credentialValidationError(form);
+    const validationError = credentialValidationError(form, isEditing);
     if (validationError) {
       setError(validationError);
       return;
@@ -484,13 +509,13 @@ function AddConnectionWizard({
           }
         });
       }
-      const objectStore = await api.createObjectStoreConnection(token, {
+      const objectStorePayload = {
         environment_id: environment.id,
         name: `${form.name}-storage`,
         store_type: form.store,
         endpoint: form.endpoint || undefined,
         region: form.region,
-        auth_ref: storageAuthRef(form) ?? undefined,
+        auth_ref: storageAuthRefForSave(form, initialObjectStore),
         settings: {
           warehouse: form.warehouse,
           access_style: form.accessStyle,
@@ -500,14 +525,18 @@ function AddConnectionWizard({
           remote_signing: form.remoteSigning,
           storage_auth: storageAuthSettings(form)
         }
-      });
-      const catalogConnection = await api.createCatalogConnection(token, {
+      };
+      const objectStore =
+        isEditing && initialObjectStore
+          ? await api.updateObjectStoreConnection(token, initialObjectStore.id, objectStorePayload)
+          : await api.createObjectStoreConnection(token, objectStorePayload);
+      const catalogPayload = {
         environment_id: environment.id,
         name: form.name,
         catalog_type: form.catalog,
         endpoint: form.uri,
         warehouse: form.warehouse,
-        auth_ref: catalogAuthRef(form),
+        auth_ref: catalogAuthRefForSave(form, initialConnection),
         settings: {
           storage: form.store,
           region: form.region,
@@ -521,7 +550,11 @@ function AddConnectionWizard({
           catalog_auth: catalogAuthSettings(form),
           object_store_connection_id: objectStore.id
         }
-      });
+      };
+      const catalogConnection =
+        isEditing && initialConnection
+          ? await api.updateCatalogConnection(token, initialConnection.id, catalogPayload)
+          : await api.createCatalogConnection(token, catalogPayload);
       const result = await api.testCatalogConnection(token, catalogConnection.id);
       setTestResult(result);
       if (result.status === "failed") {
@@ -542,9 +575,13 @@ function AddConnectionWizard({
       <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg border border-zinc-200 bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3">
           <div>
-            <div className="text-sm font-medium text-zinc-900">Add lakehouse connection</div>
+            <div className="text-sm font-medium text-zinc-900">
+              {isEditing ? "Edit lakehouse connection" : "Add lakehouse connection"}
+            </div>
             <div className="mt-0.5 text-xs text-zinc-400">
-              Create the environment, catalog metadata connection, and manifest/table storage reference used by Iceyard.
+              {isEditing
+                ? "Update catalog metadata, storage settings, and credentials. Stored secrets are never displayed."
+                : "Create the environment, catalog metadata connection, and manifest/table storage reference used by Iceyard."}
             </div>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100">
@@ -652,16 +689,31 @@ function AddConnectionWizard({
                 {form.catalogAuth === "basic" ? (
                   <>
                     <Field label="username" value={form.catalogUsername} onChange={(value) => set("catalogUsername", value)} />
-                    <PasswordField label="password" value={form.catalogPassword} onChange={(value) => set("catalogPassword", value)} />
+                    <PasswordField
+                      label="password"
+                      value={form.catalogPassword}
+                      onChange={(value) => set("catalogPassword", value)}
+                      placeholder={isEditing ? "leave blank to keep current password" : undefined}
+                    />
                   </>
                 ) : null}
                 {form.catalogAuth === "bearer" ? (
-                  <PasswordField label="bearer token" value={form.catalogBearerToken} onChange={(value) => set("catalogBearerToken", value)} />
+                  <PasswordField
+                    label="bearer token"
+                    value={form.catalogBearerToken}
+                    onChange={(value) => set("catalogBearerToken", value)}
+                    placeholder={isEditing ? "leave blank to keep current token" : undefined}
+                  />
                 ) : null}
                 {form.catalogAuth === "oauth_client" ? (
                   <>
                     <Field label="client id" value={form.catalogClientId} onChange={(value) => set("catalogClientId", value)} />
-                    <PasswordField label="client secret" value={form.catalogClientSecret} onChange={(value) => set("catalogClientSecret", value)} />
+                    <PasswordField
+                      label="client secret"
+                      value={form.catalogClientSecret}
+                      onChange={(value) => set("catalogClientSecret", value)}
+                      placeholder={isEditing ? "leave blank to keep current client secret" : undefined}
+                    />
                   </>
                 ) : null}
                 {form.catalogAuth === "aws_iam" ? (
@@ -739,7 +791,12 @@ function AddConnectionWizard({
                 {form.storageAuth === "static_key" ? (
                   <>
                     <Field label="AWS access key id" value={form.awsAccessKeyId} onChange={(value) => set("awsAccessKeyId", value)} />
-                    <PasswordField label="AWS secret access key" value={form.awsSecretAccessKey} onChange={(value) => set("awsSecretAccessKey", value)} />
+                    <PasswordField
+                      label="AWS secret access key"
+                      value={form.awsSecretAccessKey}
+                      onChange={(value) => set("awsSecretAccessKey", value)}
+                      placeholder={isEditing ? "leave blank to keep current secret key" : undefined}
+                    />
                     <PasswordField label="AWS session token (optional)" value={form.awsSessionToken} onChange={(value) => set("awsSessionToken", value)} />
                   </>
                 ) : null}
@@ -778,7 +835,7 @@ function AddConnectionWizard({
           <div className="flex gap-2">
             <Button onClick={onClose}>{testResult ? "Close" : "Cancel"}</Button>
             <Button variant="primary" onClick={saveConnection} disabled={saving}>
-              {saving ? "Saving & testing..." : "Save & test connection"}
+              {saving ? "Saving & testing..." : isEditing ? "Update & test connection" : "Save & test connection"}
             </Button>
           </div>
         </div>
@@ -979,23 +1036,118 @@ function Eyebrow({ children }: { children: ReactNode }) {
   return <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">{children}</div>;
 }
 
+function linkedStoreForConnection(connection: CatalogConnectionRead, stores: ObjectStoreConnectionRead[]) {
+  const storeId = asString(connection.settings.object_store_connection_id);
+  if (!storeId) return null;
+  return stores.find((store) => store.id === storeId) ?? null;
+}
+
+function formFromConnection(
+  connection: CatalogConnectionRead | undefined,
+  store: ObjectStoreConnectionRead | null | undefined,
+  environments: EnvironmentRead[]
+): FormState {
+  if (!connection) {
+    return {
+      ...DEFAULT_FORM,
+      envName: environments[0]?.name ?? ""
+    };
+  }
+  const environment = environments.find((item) => item.id === connection.environment_id);
+  const catalogAuth = objectSetting(connection.settings.catalog_auth);
+  const storageSettings = store?.settings ?? {};
+  const storageAuth = objectSetting(storageSettings.storage_auth);
+  const jdbc = objectSetting(connection.settings.jdbc_options);
+  return {
+    ...DEFAULT_FORM,
+    envName: environment?.name ?? "",
+    name: connection.name,
+    catalog: asCatalogType(connection.catalog_type),
+    uri: connection.endpoint ?? "",
+    warehouse: connection.warehouse ?? asString(storageSettings.warehouse) ?? "",
+    store: asStoreType(store?.store_type ?? asString(connection.settings.storage)),
+    region: store?.region ?? asString(connection.settings.region) ?? environment?.region ?? "",
+    endpoint: store?.endpoint ?? asString(connection.settings.endpoint) ?? "",
+    accessStyle: asAccessStyle(storageSettings.access_style ?? connection.settings.access_style),
+    sse: asSse(storageSettings.server_side_encryption ?? connection.settings.server_side_encryption),
+    kmsKeyArn: asString(storageSettings.kms_key_arn ?? connection.settings.kms_key_arn) ?? "",
+    remoteSigning: Boolean(storageSettings.remote_signing ?? connection.settings.remote_signing),
+    catalogAuth: asCatalogAuthType(catalogAuth.mode),
+    catalogUsername: asString(catalogAuth.username) ?? "",
+    catalogClientId: asString(catalogAuth.client_id) ?? "",
+    catalogIdentity: asString(catalogAuth.identity) ?? "",
+    catalogSecretReference: asString(catalogAuth.secret_reference) ?? "",
+    jdbcSslMode: asJdbcSslMode(jdbc.sslmode),
+    jdbcSslRootCert: asString(jdbc.ssl_root_cert) ?? "",
+    jdbcApplicationName: asString(jdbc.application_name) ?? "iceyard",
+    storageAuth: asStorageAuthType(storageAuth.mode),
+    storageIdentity: asString(storageAuth.identity) ?? "",
+    storageSecretReference: asString(storageAuth.secret_reference) ?? "",
+    awsAccessKeyId: asString(storageAuth.aws_access_key_id) ?? ""
+  };
+}
+
+function objectSetting(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asCatalogType(value: unknown): CatalogType {
+  return CATALOGS.some(([key]) => key === value) ? (value as CatalogType) : "rest";
+}
+
+function asStoreType(value: unknown): StoreType {
+  return STORES.some(([key]) => key === value) ? (value as StoreType) : "s3";
+}
+
+function asCatalogAuthType(value: unknown): CatalogAuthType {
+  return CATALOG_AUTHS.some(([key]) => key === value) ? (value as CatalogAuthType) : "none";
+}
+
+function asStorageAuthType(value: unknown): StorageAuthType {
+  return STORAGE_AUTHS.some(([key]) => key === value) ? (value as StorageAuthType) : "keyless";
+}
+
+function asJdbcSslMode(value: unknown): JdbcSslMode {
+  const modes: JdbcSslMode[] = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"];
+  return modes.includes(value as JdbcSslMode) ? (value as JdbcSslMode) : "prefer";
+}
+
+function asAccessStyle(value: unknown): FormState["accessStyle"] {
+  return value === "path-style" ? "path-style" : "virtual-hosted";
+}
+
+function asSse(value: unknown): FormState["sse"] {
+  return value === "s3" || value === "kms" || value === "dsse-kms" ? value : "none";
+}
+
 function catalogAuthSettings(form: FormState): Record<string, unknown> {
   if (form.catalogAuth === "basic") {
-    return {
+    const settings: Record<string, unknown> = {
       mode: form.catalogAuth,
-      username: form.catalogUsername,
-      password: form.catalogPassword
+      username: form.catalogUsername
     };
+    if (form.catalogPassword) settings.password = form.catalogPassword;
+    return settings;
   }
   if (form.catalogAuth === "bearer") {
-    return { mode: form.catalogAuth, bearer_token: form.catalogBearerToken };
-  }
-  if (form.catalogAuth === "oauth_client") {
     return {
       mode: form.catalogAuth,
-      client_id: form.catalogClientId,
-      client_secret: form.catalogClientSecret
+      ...(form.catalogBearerToken ? { bearer_token: form.catalogBearerToken } : {})
     };
+  }
+  if (form.catalogAuth === "oauth_client") {
+    const settings: Record<string, unknown> = {
+      mode: form.catalogAuth,
+      client_id: form.catalogClientId
+    };
+    if (form.catalogClientSecret) settings.client_secret = form.catalogClientSecret;
+    return settings;
   }
   if (form.catalogAuth === "aws_iam") {
     return { mode: form.catalogAuth, identity: form.catalogIdentity };
@@ -1017,12 +1169,13 @@ function jdbcOptions(form: FormState): Record<string, unknown> | undefined {
 
 function storageAuthSettings(form: FormState): Record<string, unknown> {
   if (form.storageAuth === "static_key") {
-    return {
+    const settings: Record<string, unknown> = {
       mode: form.storageAuth,
-      aws_access_key_id: form.awsAccessKeyId,
-      aws_secret_access_key: form.awsSecretAccessKey,
-      aws_session_token: form.awsSessionToken || undefined
+      aws_access_key_id: form.awsAccessKeyId
     };
+    if (form.awsSecretAccessKey) settings.aws_secret_access_key = form.awsSecretAccessKey;
+    if (form.awsSessionToken) settings.aws_session_token = form.awsSessionToken;
+    return settings;
   }
   if (form.storageAuth === "secret_ref") {
     return { mode: form.storageAuth, secret_reference: form.storageSecretReference };
@@ -1033,22 +1186,51 @@ function storageAuthSettings(form: FormState): Record<string, unknown> {
   return { mode: "credential_vending" };
 }
 
-function catalogAuthRef(form: FormState) {
-  return form.catalogAuth === "secret_ref" && form.catalogSecretReference ? form.catalogSecretReference : null;
+function catalogAuthRefForSave(
+  form: FormState,
+  initialConnection: CatalogConnectionRead | undefined
+) {
+  if (form.catalogAuth === "secret_ref") {
+    return form.catalogSecretReference || null;
+  }
+  if (
+    initialConnection &&
+    (form.catalogAuth === "basic" ||
+      form.catalogAuth === "bearer" ||
+      form.catalogAuth === "oauth_client")
+  ) {
+    return initialConnection.auth_ref;
+  }
+  return null;
 }
 
-function storageAuthRef(form: FormState) {
-  return form.storageAuth === "secret_ref" && form.storageSecretReference ? form.storageSecretReference : null;
+function storageAuthRefForSave(
+  form: FormState,
+  initialObjectStore: ObjectStoreConnectionRead | null | undefined
+) {
+  if (form.storageAuth === "secret_ref") {
+    return form.storageSecretReference || null;
+  }
+  if (initialObjectStore && form.storageAuth === "static_key") {
+    return initialObjectStore.auth_ref;
+  }
+  return null;
 }
 
-function credentialValidationError(form: FormState) {
-  if (form.catalogAuth === "basic" && (!form.catalogUsername || !form.catalogPassword)) {
+function credentialValidationError(form: FormState, isEditing: boolean) {
+  if (form.catalogAuth === "basic" && !form.catalogUsername) {
+    return "Catalog username is required.";
+  }
+  if (form.catalogAuth === "basic" && !isEditing && !form.catalogPassword) {
     return "Catalog username and password are required.";
   }
-  if (form.catalogAuth === "bearer" && !form.catalogBearerToken) {
+  if (form.catalogAuth === "bearer" && !isEditing && !form.catalogBearerToken) {
     return "Catalog bearer token is required.";
   }
-  if (form.catalogAuth === "oauth_client" && (!form.catalogClientId || !form.catalogClientSecret)) {
+  if (form.catalogAuth === "oauth_client" && !form.catalogClientId) {
+    return "Catalog OAuth client id is required.";
+  }
+  if (form.catalogAuth === "oauth_client" && !isEditing && !form.catalogClientSecret) {
     return "Catalog OAuth client id and client secret are required.";
   }
   if (form.catalogAuth === "secret_ref" && !form.catalogSecretReference) {
@@ -1061,7 +1243,10 @@ function credentialValidationError(form: FormState) {
   ) {
     return "JDBC verify-ca and verify-full require the database root CA certificate.";
   }
-  if (form.storageAuth === "static_key" && (!form.awsAccessKeyId || !form.awsSecretAccessKey)) {
+  if (form.storageAuth === "static_key" && !form.awsAccessKeyId) {
+    return "AWS access key id is required.";
+  }
+  if (form.storageAuth === "static_key" && !isEditing && !form.awsSecretAccessKey) {
     return "AWS access key id and secret access key are required.";
   }
   if (form.storageAuth === "secret_ref" && !form.storageSecretReference) {

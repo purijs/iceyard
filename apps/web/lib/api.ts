@@ -140,6 +140,25 @@ export const api = {
       settings?: Record<string, unknown>;
     }
   ) => request<CatalogConnectionRead>("/api/v1/connections/catalogs", { method: "POST", body: JSON.stringify(body) }, token),
+  updateCatalogConnection: (
+    token: string,
+    connectionId: string,
+    body: {
+      environment_id?: string;
+      name?: string;
+      catalog_type?: string;
+      endpoint?: string | null;
+      warehouse?: string | null;
+      auth_ref?: string | null;
+      settings?: Record<string, unknown>;
+      is_enabled?: boolean;
+    }
+  ) =>
+    request<CatalogConnectionRead>(
+      `/api/v1/connections/catalogs/${connectionId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      token
+    ),
   deleteCatalogConnection: (token: string, connectionId: string) =>
     request<void>(`/api/v1/connections/catalogs/${connectionId}`, { method: "DELETE" }, token),
   testCatalogConnection: (token: string, connectionId: string) =>
@@ -152,11 +171,29 @@ export const api = {
       store_type: "s3" | "gcs" | "adls" | "hdfs" | "local";
       endpoint?: string;
       region?: string;
-      auth_ref?: string;
+      auth_ref?: string | null;
       settings?: Record<string, unknown>;
     }
   ) =>
     request<ObjectStoreConnectionRead>("/api/v1/connections/object-stores", { method: "POST", body: JSON.stringify(body) }, token),
+  updateObjectStoreConnection: (
+    token: string,
+    storeId: string,
+    body: {
+      environment_id?: string;
+      name?: string;
+      store_type?: "s3" | "gcs" | "adls" | "hdfs" | "local";
+      endpoint?: string | null;
+      region?: string | null;
+      auth_ref?: string | null;
+      settings?: Record<string, unknown>;
+    }
+  ) =>
+    request<ObjectStoreConnectionRead>(
+      `/api/v1/connections/object-stores/${storeId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      token
+    ),
   deleteObjectStoreConnection: (token: string, storeId: string) =>
     request<void>(`/api/v1/connections/object-stores/${storeId}`, { method: "DELETE" }, token),
   testObjectStoreConnection: (token: string, storeId: string) =>
