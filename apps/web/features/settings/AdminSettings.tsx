@@ -113,6 +113,15 @@ function RuntimeSettings({
   const [backendType, setBackendType] = useState<ComputeBackendRead["backend_type"]>("spark");
   const [endpoint, setEndpoint] = useState("");
   const [principal, setPrincipal] = useState("");
+  const [deployMode, setDeployMode] = useState("cluster");
+  const [sparkImage, setSparkImage] = useState("");
+  const [sparkNamespace, setSparkNamespace] = useState("");
+  const [serviceAccount, setServiceAccount] = useState("");
+  const [uploadPath, setUploadPath] = useState("");
+  const [packages, setPackages] = useState("org.apache.hadoop:hadoop-aws:3.3.1");
+  const [extraConf, setExtraConf] = useState("");
+  const [trinoCatalog, setTrinoCatalog] = useState("iceberg");
+  const [authMode, setAuthMode] = useState("runtime_identity");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -127,12 +136,43 @@ function RuntimeSettings({
         settings: {
           endpoint: endpoint.trim() || undefined,
           principal: principal.trim() || undefined,
-          execution_model: backendType === "duckdb" ? "local" : "external"
+          execution_model: backendType === "duckdb" ? "local" : "external",
+          auth_mode: authMode,
+          spark:
+            backendType === "spark"
+              ? {
+                  deploy_mode: deployMode,
+                  master_url: endpoint.trim() || undefined,
+                  image: sparkImage.trim() || undefined,
+                  namespace: sparkNamespace.trim() || undefined,
+                  service_account: serviceAccount.trim() || principal.trim() || undefined,
+                  upload_path: uploadPath.trim() || undefined,
+                  packages: packages
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean),
+                  extra_conf: parseKeyValueLines(extraConf)
+                }
+              : undefined,
+          trino:
+            backendType === "trino"
+              ? {
+                  endpoint: endpoint.trim() || undefined,
+                  catalog: trinoCatalog.trim() || undefined,
+                  auth_mode: authMode,
+                  session_properties: parseKeyValueLines(extraConf)
+                }
+              : undefined
         }
       });
       await onRefresh();
       setEndpoint("");
       setPrincipal("");
+      setSparkImage("");
+      setSparkNamespace("");
+      setServiceAccount("");
+      setUploadPath("");
+      setExtraConf("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create compute backend.");
     } finally {
@@ -182,13 +222,73 @@ function RuntimeSettings({
             <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" value={name} onChange={(event) => setName(event.target.value)} />
           </label>
           <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
-            Endpoint
-            <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="spark://, trino://, http://..." value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />
+            {backendType === "spark" ? "Master URL" : backendType === "trino" ? "Trino endpoint" : "Endpoint"}
+            <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="k8s://, spark://, yarn, local, https://trino..." value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />
           </label>
           <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
-            Principal
-            <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="service account or role" value={principal} onChange={(event) => setPrincipal(event.target.value)} />
+            Runtime identity
+            <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="service account, role, or username" value={principal} onChange={(event) => setPrincipal(event.target.value)} />
           </label>
+          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+            Auth mode
+            <select className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" value={authMode} onChange={(event) => setAuthMode(event.target.value)}>
+              <option value="runtime_identity">runtime identity</option>
+              <option value="secret_reference">secret reference</option>
+              <option value="basic">username/password</option>
+              <option value="bearer">bearer token</option>
+            </select>
+          </label>
+          {backendType === "spark" ? (
+            <>
+              <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Deploy mode
+                <select className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" value={deployMode} onChange={(event) => setDeployMode(event.target.value)}>
+                  <option value="cluster">cluster</option>
+                  <option value="client">client</option>
+                  <option value="local">local</option>
+                  <option value="yarn">yarn</option>
+                  <option value="standalone">standalone</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Container image
+                <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="registry/team/spark:tag" value={sparkImage} onChange={(event) => setSparkImage(event.target.value)} />
+              </label>
+              <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Namespace
+                <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="kubernetes namespace" value={sparkNamespace} onChange={(event) => setSparkNamespace(event.target.value)} />
+              </label>
+              <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Service account
+                <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="spark driver service account" value={serviceAccount} onChange={(event) => setServiceAccount(event.target.value)} />
+              </label>
+              <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Upload path
+                <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="s3a://bucket/spark-uploads/" value={uploadPath} onChange={(event) => setUploadPath(event.target.value)} />
+              </label>
+              <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400 lg:col-span-2">
+                Packages
+                <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" placeholder="comma-separated Maven coordinates" value={packages} onChange={(event) => setPackages(event.target.value)} />
+              </label>
+            </>
+          ) : null}
+          {backendType === "trino" ? (
+            <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Trino catalog
+              <input className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm normal-case tracking-normal text-zinc-900" value={trinoCatalog} onChange={(event) => setTrinoCatalog(event.target.value)} />
+            </label>
+          ) : null}
+          {(backendType === "spark" || backendType === "trino") ? (
+            <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-zinc-400 lg:col-span-5">
+              Extra config
+              <textarea
+                className="min-h-24 w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-sm normal-case tracking-normal text-zinc-900"
+                placeholder="spark.hadoop.fs.s3a.path.style.access=true&#10;spark.dynamicAllocation.enabled=true"
+                value={extraConf}
+                onChange={(event) => setExtraConf(event.target.value)}
+              />
+            </label>
+          ) : null}
           <div className="lg:col-span-5 flex items-center justify-between gap-3">
             <span className="text-xs text-zinc-400">Credentials should be configured by secret reference or runtime identity before enabling real execution adapters.</span>
             <Button variant="primary" onClick={createBackend} disabled={!environmentId || !name.trim() || submitting}>
@@ -271,5 +371,20 @@ function RuntimeRow({
       </div>
       <div className="mt-1 text-xs text-zinc-500">{detail}</div>
     </div>
+  );
+}
+
+function parseKeyValueLines(value: string) {
+  return Object.fromEntries(
+    value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => {
+        const separator = line.includes("=") ? "=" : ":";
+        const [key, ...rest] = line.split(separator);
+        return [key.trim(), rest.join(separator).trim()];
+      })
+      .filter(([key]) => key)
   );
 }

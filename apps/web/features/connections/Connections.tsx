@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, HardDrive, Lock, Pencil, Plus, RefreshCw, Server, Trash2, X } from "lucide-react";
+import { ChevronDown, Database, HardDrive, Lock, Pencil, Plus, RefreshCw, Server, Trash2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
@@ -183,6 +183,7 @@ export function Connections({
   const [actionError, setActionError] = useState<string | null>(null);
   const [testingIds, setTestingIds] = useState<Set<string>>(() => new Set());
   const [syncingIds, setSyncingIds] = useState<Set<string>>(() => new Set());
+  const [openSyncMenuId, setOpenSyncMenuId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
   const [syncResults, setSyncResults] = useState<Record<string, TableIndexRefreshResult>>({});
   const tablesByEnvironment = useMemo(() => {
@@ -192,7 +193,7 @@ export function Connections({
   }, [tables]);
 
   async function deleteConnection(connection: CatalogConnectionRead) {
-    if (!window.confirm(`Delete catalog connection "${connection.name}"? Indexed metadata for tables using it may need to be refreshed after reconnecting.`)) {
+    if (!window.confirm(`Delete catalog connection "${connection.name}"? Synced metadata for tables using it will be removed from Iceyard.`)) {
       return;
     }
     setActionError(null);
@@ -235,15 +236,15 @@ export function Connections({
     }
   }
 
-  async function syncCatalog(connection: CatalogConnectionRead) {
+  async function syncCatalog(connection: CatalogConnectionRead, force = false) {
     setActionError(null);
     setSyncingIds((current) => new Set(current).add(connection.id));
     try {
-      const result = await api.refreshTableIndex(token, { catalog_connection_id: connection.id });
+      const result = await api.syncCatalogMetadata(token, connection.id, { force });
       setSyncResults((current) => ({ ...current, [connection.id]: result }));
       await onRefresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Unable to sync tables.");
+      setActionError(err instanceof Error ? err.message : "Unable to sync metadata.");
     } finally {
       setSyncingIds((current) => {
         const next = new Set(current);
@@ -274,7 +275,7 @@ export function Connections({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-zinc-500">
-          State is reproducible. The catalog remains the source of truth; the local index is a rebuildable cache.
+          The catalog and Iceberg metadata files remain the source of truth. Iceyard stores a rebuildable metadata cache for search, previews, and audit.
         </p>
         <Button variant="primary" onClick={() => setShowWizard(true)}>
           <span className="inline-flex items-center gap-2">
@@ -300,7 +301,7 @@ export function Connections({
                   {environment.kind !== environment.name ? <Badge>{environment.kind}</Badge> : null}
                 </span>
               }
-              right={<span className="text-xs text-zinc-400">{tablesByEnvironment.get(environment.id) ?? 0} indexed tables</span>}
+              right={<span className="text-xs text-zinc-400">{tablesByEnvironment.get(environment.id) ?? 0} synced tables</span>}
             >
               <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
                 <div className="space-y-3">
@@ -317,13 +318,17 @@ export function Connections({
                           <span className="text-xs text-zinc-400">
                             {connection.last_tested_at ? `tested ${new Date(connection.last_tested_at).toLocaleTimeString()}` : "not tested"}
                           </span>
-                          <Button onClick={() => void testCatalog(connection)} disabled={testingIds.has(connection.id)}>
-                            {testingIds.has(connection.id) ? "Testing..." : "Test"}
-                          </Button>
-                          <Button onClick={() => void syncCatalog(connection)} disabled={syncingIds.has(connection.id) || !connection.is_enabled}>
-                            <RefreshCw size={14} />
-                            {syncingIds.has(connection.id) ? "Syncing..." : "Sync tables"}
-                          </Button>
+                          <ConnectionSyncMenu
+                            open={openSyncMenuId === connection.id}
+                            onOpenChange={(open) => setOpenSyncMenuId(open ? connection.id : null)}
+                            testing={testingIds.has(connection.id)}
+                            syncing={syncingIds.has(connection.id)}
+                            disabled={!connection.is_enabled}
+                            result={syncResults[connection.id]}
+                            onTest={() => void testCatalog(connection)}
+                            onSync={() => void syncCatalog(connection)}
+                            onForceSync={() => void syncCatalog(connection, true)}
+                          />
                           <Button onClick={() => setEditingConnection(connection)}>
                             <Pencil size={14} /> Edit
                           </Button>
@@ -337,7 +342,7 @@ export function Connections({
                         <ConnectionRow icon={<Server size={15} />} label="Catalog URI" value={connection.endpoint ?? "not set"} mono />
                         <ConnectionRow icon={<HardDrive size={15} />} label="Object storage" value={connection.warehouse ?? "not set"} mono />
                         <ConnectionRow label="Region" value={environment.region ?? String(connection.settings.region ?? "not set")} />
-                        <ConnectionRow label="Indexed tables" value={tables.filter((table) => table.environment_id === environment.id).length} />
+                        <ConnectionRow label="Synced tables" value={tables.filter((table) => table.catalog_connection_id === connection.id).length} />
                       </dl>
                       <div className="mt-4 border-t border-zinc-100 pt-4">
                         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Capabilities probed</div>
@@ -356,7 +361,6 @@ export function Connections({
                       </div>
                       <p className="mt-3 text-xs text-zinc-400">{CAPABILITY_PREVIEW[connection.catalog_type]?.note ?? "Capabilities are driven by the connection probe."}</p>
                       {testResults[connection.id] ? <ConnectionTestSummary result={testResults[connection.id]} /> : null}
-                      {syncResults[connection.id] ? <SyncSummary result={syncResults[connection.id]} /> : null}
                     </div>
                   ))}
                   {!envConnections.length ? <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-400">No catalog connections in this environment.</div> : null}
@@ -912,16 +916,141 @@ function ConnectionTestSummary({ result, compact = false }: { result: Connection
   );
 }
 
-function SyncSummary({ result }: { result: TableIndexRefreshResult }) {
+function ConnectionSyncMenu({
+  open,
+  onOpenChange,
+  testing,
+  syncing,
+  disabled,
+  result,
+  onTest,
+  onSync,
+  onForceSync
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  testing: boolean;
+  syncing: boolean;
+  disabled: boolean;
+  result?: TableIndexRefreshResult;
+  onTest: () => void;
+  onSync: () => void;
+  onForceSync: () => void;
+}) {
   return (
-    <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+    <div className="relative">
+      <Button onClick={() => onOpenChange(!open)} disabled={disabled}>
+        <RefreshCw size={14} className={syncing || testing ? "animate-spin" : ""} />
+        Sync
+        <ChevronDown size={14} />
+      </Button>
+      {open ? (
+        <div className="absolute right-0 top-10 z-40 w-96 rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-xl">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-zinc-900">Connection checks</div>
+              <div className="text-xs text-zinc-400">Probe reachability, then sync table metadata</div>
+            </div>
+            {syncing || testing ? <Badge tone="warning">running</Badge> : null}
+          </div>
+          <div className="space-y-1">
+            <button
+              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              disabled={testing || syncing}
+              onClick={onTest}
+            >
+              <span>
+                <span className="block font-medium text-zinc-800">Test connection</span>
+                <span className="block text-xs text-zinc-400">Catalog auth, database reachability, and linked storage</span>
+              </span>
+              <RefreshCw size={14} />
+            </button>
+            <button
+              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              disabled={testing || syncing}
+              onClick={onSync}
+            >
+              <span>
+                <span className="block font-medium text-zinc-800">Sync metadata</span>
+                <span className="block text-xs text-zinc-400">Incremental catalog tables and Iceberg metadata</span>
+              </span>
+              <RefreshCw size={14} />
+            </button>
+            <button
+              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              disabled={testing || syncing}
+              onClick={onForceSync}
+            >
+              <span>
+                <span className="block font-medium text-zinc-800">Force full metadata sync</span>
+                <span className="block text-xs text-zinc-400">Re-read unchanged metadata pointers</span>
+              </span>
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          {syncing || testing ? <SyncProgress label={syncing ? "Sync in progress" : "Connection test in progress"} /> : null}
+          {result ? <SyncSummary result={result} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SyncProgress({ label }: { label: string }) {
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="font-medium">{label}</span>
+        <span className="text-xs">running</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/70">
+        <div className="h-full w-2/3 animate-pulse rounded-full bg-amber-500" />
+      </div>
+      <div className="mt-3 space-y-2">
+        <SyncStage label="Catalog tables" progress={70} />
+        <SyncStage label="Iceberg metadata files" progress={55} />
+        <SyncStage label="Metadata cache" progress={35} />
+      </div>
+    </div>
+  );
+}
+
+function SyncStage({ label, progress }: { label: string; progress: number }) {
+  return (
+    <div className="grid grid-cols-[8rem_1fr_2.5rem] items-center gap-2 text-xs">
+      <span>{label}</span>
+      <div className="h-1 overflow-hidden rounded-full bg-white/70">
+        <div className="h-full rounded-full bg-current" style={{ width: `${progress}%` }} />
+      </div>
+      <span className="text-right font-mono">{progress}%</span>
+    </div>
+  );
+}
+
+function SyncSummary({ result }: { result: TableIndexRefreshResult }) {
+  const failed = result.failed_table_count > 0 || result.errors.length > 0;
+  return (
+    <div className={`mt-3 rounded-md border p-3 text-sm ${failed ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
       <div className="flex items-center justify-between gap-3">
-        <span className="font-medium">Table sync complete</span>
-        <span className="font-mono text-xs">{result.table_count} indexed</span>
+        <span className="font-medium">{failed ? "Metadata sync failed" : "Metadata sync complete"}</span>
+        <span className="font-mono text-xs">{result.table_count} tables</span>
       </div>
-      <div className="mt-1 text-xs text-emerald-700">
-        {result.discovered_table_count} discovered · {result.removed_table_count} removed · {result.namespace_count} namespaces
+      <div className={`mt-1 text-xs ${failed ? "text-red-700" : "text-emerald-700"}`}>
+        {result.parsed_table_count} parsed · {result.skipped_table_count} unchanged · {result.failed_table_count} failed · {result.removed_table_count} removed
       </div>
+      <div className={`mt-1 text-xs ${failed ? "text-red-700" : "text-emerald-700"}`}>
+        {result.parse_job_count} metadata reads · {result.worker_count} workers
+      </div>
+      {result.errors.length ? (
+        <div className="mt-2 space-y-1 text-xs text-red-700">
+          {result.errors.slice(0, 3).map((error, index) => (
+            <div key={`${error.table ?? "table"}-${index}`}>
+              {error.table ? `${error.table}: ` : null}
+              {error.error}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -74,6 +74,13 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
         headers=headers,
     )
     assert namespace_dry_run.status_code == 200, namespace_dry_run.text
+    namespace_execute = client.post(
+        "/api/v1/operations/execute",
+        json={"dry_run_id": namespace_dry_run.json()["id"]},
+        headers=headers,
+    )
+    assert namespace_execute.status_code == 200
+    assert namespace_execute.json()["status"] == "queued"
 
     missing_table = client.post(
         "/api/v1/operations/dry-run",
@@ -126,7 +133,8 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
         headers=headers,
     )
     assert execute.status_code == 200, execute.text
-    assert execute.json()["status"] == "queued"
+    assert execute.json()["status"] == "blocked"
+    assert "compute backend" in execute.json()["message"]
 
     jobs = client.get("/api/v1/jobs", headers=headers)
     assert jobs.status_code == 200
@@ -152,8 +160,5 @@ def test_destructive_operation_requires_approval(client: TestClient, token: str)
         headers=headers,
     )
     assert execute.status_code == 200
-    assert execute.json()["status"] == "requires_approval"
-
-    approvals = client.get("/api/v1/approvals", headers=headers)
-    assert approvals.status_code == 200
-    assert approvals.json()[0]["status"] == "pending"
+    assert execute.json()["status"] == "blocked"
+    assert "compute backend" in execute.json()["message"]

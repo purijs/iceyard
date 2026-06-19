@@ -444,10 +444,21 @@ function isVisibleParam(param: OperationParam, params: Record<string, unknown>) 
 }
 
 function operationRequiresTable(operation: OperationDescriptor) {
-  return /\{(?:qualified_table|table)\}/.test(operation.sql_template);
+  return operation.requires_table && /\{(?:qualified_table|table)\}/.test(operation.sql_template);
 }
 
 function scopeBucket(operation: OperationDescriptor): ScopeFilter {
+  if (operation.scope === "namespace") return "namespace";
+  if (operation.scope === "maintenance") return "maintenance";
+  if (operation.scope === "governance") return "governance";
+  if (operation.scope === "migration") return "views";
+  if (operation.scope === "catalog" || operation.scope === "none") return "catalog";
+  if (operation.scope === "table") {
+    if (operation.category === "Schema" || operation.category === "Partition") return "schema";
+    if (["Time travel", "Metadata tables", "Branch and tag", "Snapshots"].includes(operation.category)) return "snapshots";
+    if (["Maintenance", "Tuning", "Stats and CDC", "DML"].includes(operation.category)) return "maintenance";
+    return "table-ddl";
+  }
   if (operation.category === "Namespace") return "namespace";
   if (operation.category === "Table DDL") return operationRequiresTable(operation) ? "table-ddl" : "catalog";
   if (operation.category === "Schema" || operation.category === "Partition") return "schema";
@@ -476,10 +487,11 @@ function scopeLabel(scope: ScopeFilter) {
 
 function runtimeMeta(operation: OperationDescriptor, context: ControlContext) {
   if (context.isAll) return { status: "read_only" as const, label: "Select catalog" };
-  if (operation.safety_class === "READ" || operation.safety_class === "METADATA" || operation.safety_class === "MIGRATION_ADMIN") {
+  if (operation.native_preview) return { status: "native" as const, label: "Native preview" };
+  if (operation.native_metadata || operation.safety_class === "READ" || operation.safety_class === "METADATA") {
     return { status: "native" as const, label: "Native catalog" };
   }
-  if (operation.safety_class === "REWRITE" || operation.safety_class === "WRITE" || operation.safety_class === "DESTRUCTIVE") {
+  if (operation.spark_required || operation.writes_data || operation.safety_class === "REWRITE" || operation.safety_class === "WRITE" || operation.safety_class === "DESTRUCTIVE") {
     return { status: "requires_compute" as const, label: "Requires compute backend" };
   }
   return { status: "internal" as const, label: "Internal worker" };

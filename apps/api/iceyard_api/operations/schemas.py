@@ -32,6 +32,24 @@ class OperationDescriptor(BaseModel):
     restore_point_required: bool
     gates: list[str]
     docs_url: str | None = None
+    scope: Literal[
+        "catalog",
+        "namespace",
+        "table",
+        "none",
+        "governance",
+        "maintenance",
+        "migration",
+    ] = "table"
+    requires_table: bool = True
+    requires_catalog: bool = False
+    writes_data: bool = False
+    writes_metadata: bool = False
+    native_metadata: bool = False
+    native_preview: bool = False
+    spark_required: bool = False
+    trino_supported: bool = False
+    flink_supported: bool = False
 
 
 class OperationCategoryRead(BaseModel):

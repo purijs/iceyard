@@ -54,7 +54,7 @@ The current implementation includes built-in auth, roles, audit logging, connect
 
 It also includes the performance/layout/lifecycle automations: a layout & stats model, layout what-if simulation, clustering and materialized-view advisors, Parquet and write-distribution tuning, retention/TTL simulation and cleanup, Write-Audit-Publish pipelines, and declarative automation policies. See [docs/automations.md](docs/automations.md) for the endpoints and runtime status.
 
-Live catalog and execution adapters are intentionally behind interfaces; automation outputs are projections/heuristics over indexed metadata unless a compatible runtime is configured.
+Live catalog and execution adapters are intentionally behind interfaces; automation outputs are projections/heuristics over synced metadata unless a compatible runtime is configured.
 
 ### CORS
 

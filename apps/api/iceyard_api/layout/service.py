@@ -26,7 +26,7 @@ def _cardinality_hint(column: str) -> str:
 
 
 class LayoutStatsService:
-    """S1 — per-table layout & stats model, derived from the local index."""
+    """S1 - per-table layout and stats model, derived from synced metadata."""
 
     def __init__(self, session: Session):
         self.session = session
@@ -44,7 +44,7 @@ class LayoutStatsService:
         if not metrics:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Table has not been indexed yet.",
+                detail="Table metadata has not been synced yet.",
             )
 
         file_count = metrics.file_count

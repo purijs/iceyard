@@ -13,6 +13,7 @@ import type {
   EditionRead,
   EnvironmentRead,
   HealthRead,
+  MetadataSyncRunRead,
   ParquetAdvice,
   JobLogRead,
   JobRead,
@@ -29,6 +30,7 @@ import type {
   SortOrderRead,
   TablePreviewRead,
   TableIndexRefreshResult,
+  TableMetadataRead,
   TableRead,
   TableRefRead,
   TokenResponse,
@@ -117,14 +119,42 @@ export const api = {
     request<PartitionSpecRead[]>(`/api/v1/tables/${tableId}/partitions`, {}, token),
   tableSortOrders: (token: string, tableId: string) =>
     request<SortOrderRead[]>(`/api/v1/tables/${tableId}/sort-orders`, {}, token),
+  tableMetadata: (token: string, tableId: string) =>
+    request<TableMetadataRead>(`/api/v1/tables/${tableId}/metadata`, {}, token),
   tablePreview: (token: string, tableId: string, resource = "rows") =>
     request<TablePreviewRead>(`/api/v1/tables/${tableId}/preview?resource=${encodeURIComponent(resource)}`, {}, token),
-  refreshTableIndex: (token: string, body: { catalog_connection_id?: string | null }) =>
+  rowPreview: (
+    token: string,
+    tableId: string,
+    body: { limit?: number; selected_fields?: string[]; snapshot_id?: number | null }
+  ) =>
+    request<TablePreviewRead>(
+      `/api/v1/tables/${tableId}/row-preview`,
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    ),
+  refreshTableIndex: (token: string, body: { catalog_connection_id?: string | null; force?: boolean }) =>
     request<TableIndexRefreshResult>(
       "/api/v1/tables/index/refresh",
       { method: "POST", body: JSON.stringify(body) },
       token
     ),
+  syncCatalogMetadata: (token: string, catalogConnectionId: string, body: { force?: boolean } = {}) =>
+    request<TableIndexRefreshResult>(
+      `/api/v1/catalogs/${catalogConnectionId}/sync`,
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    ),
+  syncRuns: (token: string, catalogConnectionId?: string | null) => {
+    const params = new URLSearchParams();
+    if (catalogConnectionId) params.set("catalog_connection_id", catalogConnectionId);
+    const query = params.toString();
+    return request<MetadataSyncRunRead[]>(`/api/v1/tables/sync-runs${query ? `?${query}` : ""}`, {}, token);
+  },
+  syncRun: (token: string, syncRunId: string) =>
+    request<MetadataSyncRunRead>(`/api/v1/tables/sync-runs/${syncRunId}`, {}, token),
+  catalogDatabaseSchema: (token: string, catalogConnectionId: string) =>
+    request<Record<string, unknown>>(`/api/v1/catalogs/${catalogConnectionId}/database-schema`, {}, token),
   environments: (token: string) => request<EnvironmentRead[]>("/api/v1/environments", {}, token),
   connections: (token: string) => request<CatalogConnectionRead[]>("/api/v1/connections/catalogs", {}, token),
   objectStores: (token: string) =>

@@ -14,10 +14,10 @@ export function Dashboard({ tables, jobs, context }: { tables: TableRead[]; jobs
   const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
   const stats = [
     ["Tables", tables.length, context.isAll ? "all scoped catalogs" : context.label],
-    ["Storage", formatBytes(storageBytes), "indexed table data"],
+    ["Storage", formatBytes(storageBytes), "synced metadata totals"],
     ["Open issues", issueRows.length, "maintenance signals"],
     ["Active jobs", activeJobs, "queued or running"],
-    ["Scope", context.isAll ? "Summary" : "Catalog", context.label]
+    ["Scope", context.isAll ? "All envs" : "Catalog", context.label]
   ];
 
   return (
@@ -59,7 +59,7 @@ export function Dashboard({ tables, jobs, context }: { tables: TableRead[]; jobs
             </div>
             <div className="flex items-center justify-between gap-3">
               <span>Mode</span>
-              <span className="font-mono text-zinc-900">{context.isAll ? "summary" : "scoped"}</span>
+              <span className="font-mono text-zinc-900">{context.isAll ? "all environments" : "selected catalog"}</span>
             </div>
           </div>
         </Panel>

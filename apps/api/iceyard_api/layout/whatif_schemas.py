@@ -48,6 +48,6 @@ class WhatIfResult(BaseModel):
     aggregate: WhatIfAggregate
     assumptions: str
     note: str = (
-        "Projection over indexed per-file stats (assumes within-file uniformity, and "
+        "Projection over synced per-file stats (assumes within-file uniformity, and "
         "independence for z-order). Use for relative comparison; validate after applying."
     )

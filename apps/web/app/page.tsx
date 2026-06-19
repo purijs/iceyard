@@ -2,6 +2,7 @@
 
 import {
   Boxes,
+  ChevronDown,
   KeyRound,
   LayoutDashboard,
   ListChecks,
@@ -39,6 +40,7 @@ import type {
   ObjectStoreConnectionRead,
   OperationDescriptor,
   RoleRead,
+  TableIndexRefreshResult,
   TableRead,
   UserRead
 } from "@/types/api";
@@ -55,6 +57,13 @@ const NAV = [
 
 type View = (typeof NAV)[number][0] | "admin";
 type ContextId = string | "all";
+type SyncTaskState = {
+  status: "idle" | "running" | "succeeded" | "failed";
+  label: string;
+  message: string | null;
+  progress: number;
+  result: TableIndexRefreshResult | null;
+};
 
 export type ControlContext = {
   environmentId: ContextId;
@@ -90,7 +99,15 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
-  const [syncingTables, setSyncingTables] = useState(false);
+  const [syncingMetadata, setSyncingMetadata] = useState(false);
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
+  const [syncTask, setSyncTask] = useState<SyncTaskState>({
+    status: "idle",
+    label: "Metadata sync",
+    message: null,
+    progress: 0,
+    result: null
+  });
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -175,6 +192,18 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem(CONTEXT_STORAGE_KEY, JSON.stringify({ environmentId, catalogConnectionId }));
   }, [catalogConnectionId, environmentId]);
+
+  useEffect(() => {
+    if (!syncingMetadata) return;
+    const timer = window.setInterval(() => {
+      setSyncTask((current) =>
+        current.status === "running"
+          ? { ...current, progress: Math.min(92, current.progress + 7) }
+          : current
+      );
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [syncingMetadata]);
 
   useEffect(() => {
     if (environmentId === "all") {
@@ -319,22 +348,56 @@ export default function Home() {
     await loadTables(token, environmentId, catalogConnectionId);
   };
 
-  const handleSyncTables = async () => {
+  const handleSyncMetadata = async (force = false) => {
     if (!token || catalogConnectionId === "all") return;
     setError(null);
     setNotice(null);
-    setSyncingTables(true);
+    setSyncMenuOpen(true);
+    setSyncTask({
+      status: "running",
+      label: force ? "Force metadata sync" : "Metadata sync",
+      message: "Reading catalog registrations and Iceberg metadata files...",
+      progress: 12,
+      result: null
+    });
+    setSyncingMetadata(true);
     try {
-      const result = await api.refreshTableIndex(token, { catalog_connection_id: catalogConnectionId });
+      const result = await api.syncCatalogMetadata(token, catalogConnectionId, { force });
       await load(token);
       await loadTables(token, environmentId, catalogConnectionId);
-      setNotice(
-        `Synced ${result.table_count} tables (${result.discovered_table_count} new, ${result.removed_table_count} removed).`
-      );
+      const summary = syncResultMessage(result);
+      if (result.failed_table_count > 0 || result.errors.length > 0) {
+        const firstError = result.errors[0]?.error ? ` First error: ${result.errors[0].error}` : "";
+        setError(`${summary}${firstError}`);
+        setSyncTask({
+          status: "failed",
+          label: force ? "Force metadata sync" : "Metadata sync",
+          message: summary,
+          progress: 100,
+          result
+        });
+      } else {
+        setNotice(summary);
+        setSyncTask({
+          status: "succeeded",
+          label: force ? "Force metadata sync" : "Metadata sync",
+          message: summary,
+          progress: 100,
+          result
+        });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sync tables.");
+      const message = err instanceof Error ? err.message : "Unable to sync metadata.";
+      setError(message);
+      setSyncTask({
+        status: "failed",
+        label: force ? "Force metadata sync" : "Metadata sync",
+        message,
+        progress: 100,
+        result: null
+      });
     } finally {
-      setSyncingTables(false);
+      setSyncingMetadata(false);
     }
   };
 
@@ -463,13 +526,16 @@ export default function Home() {
               onConnectionChange={setCatalogConnectionId}
             />
             <ContextBadge context={context} />
-            <Button
-              onClick={handleSyncTables}
-              disabled={syncingTables || catalogConnectionId === "all"}
-            >
-              <RefreshCw size={14} />
-              {syncingTables ? "Syncing" : "Sync tables"}
-            </Button>
+            <SyncDropdown
+              open={syncMenuOpen}
+              onOpenChange={setSyncMenuOpen}
+              disabled={catalogConnectionId === "all"}
+              syncing={syncingMetadata}
+              task={syncTask}
+              onSync={() => void handleSyncMetadata(false)}
+              onForceSync={() => void handleSyncMetadata(true)}
+              onRefresh={() => void handleRefresh()}
+            />
             <div className="relative">
               <button
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-950 text-sm font-medium text-white"
@@ -660,4 +726,144 @@ function ContextBadge({ context }: { context: ControlContext }) {
       {context.catalogConnection?.catalog_type ?? "catalog"} · {context.catalogConnection?.is_enabled ? "connected" : "disabled"}
     </Badge>
   );
+}
+
+function SyncDropdown({
+  open,
+  onOpenChange,
+  disabled,
+  syncing,
+  task,
+  onSync,
+  onForceSync,
+  onRefresh
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  disabled: boolean;
+  syncing: boolean;
+  task: SyncTaskState;
+  onSync: () => void;
+  onForceSync: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="relative">
+      <Button onClick={() => onOpenChange(!open)} disabled={disabled}>
+        <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+        Sync
+        <ChevronDown size={14} />
+      </Button>
+      {open ? (
+        <div className="absolute right-0 top-10 z-50 w-96 rounded-lg border border-zinc-200 bg-white p-3 shadow-xl">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-zinc-900">Catalog sync</div>
+              <div className="text-xs text-zinc-400">Tables, metadata files, and cached detail views</div>
+            </div>
+            {syncing ? <Badge tone="warning">running</Badge> : null}
+          </div>
+          <div className="space-y-1">
+            <button
+              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              disabled={syncing}
+              onClick={onSync}
+            >
+              <span>
+                <span className="block font-medium text-zinc-800">Sync metadata</span>
+                <span className="block text-xs text-zinc-400">Incremental table and Iceberg metadata refresh</span>
+              </span>
+              <RefreshCw size={14} />
+            </button>
+            <button
+              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              disabled={syncing}
+              onClick={onForceSync}
+            >
+              <span>
+                <span className="block font-medium text-zinc-800">Force full metadata sync</span>
+                <span className="block text-xs text-zinc-400">Re-read metadata even when the pointer is unchanged</span>
+              </span>
+              <RefreshCw size={14} />
+            </button>
+            <button
+              className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-zinc-50"
+              onClick={onRefresh}
+            >
+              <span>
+                <span className="block font-medium text-zinc-800">Refresh screen</span>
+                <span className="block text-xs text-zinc-400">Reload the current view from the API</span>
+              </span>
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          {task.status !== "idle" ? <SyncTaskPanel task={task} syncing={syncing} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SyncTaskPanel({ task, syncing }: { task: SyncTaskState; syncing: boolean }) {
+  const isFailed = task.status === "failed";
+  return (
+    <div
+      className={`mt-3 rounded-md border p-3 text-sm ${
+        isFailed
+          ? "border-red-200 bg-red-50 text-red-800"
+          : task.status === "succeeded"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-amber-200 bg-amber-50 text-amber-800"
+      }`}
+    >
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="font-medium">{task.label}</span>
+        <span className="font-mono text-xs">{Math.round(task.progress)}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/70">
+        <div
+          className={`h-full rounded-full transition-all ${isFailed ? "bg-red-500" : task.status === "succeeded" ? "bg-emerald-500" : "bg-amber-500"}`}
+          style={{ width: `${task.progress}%` }}
+        />
+      </div>
+      <div className="mt-3 space-y-2">
+        <SyncStage label="Catalog tables" progress={task.status === "running" ? Math.max(35, task.progress) : 100} failed={isFailed && !task.result} />
+        <SyncStage label="Iceberg metadata files" progress={task.progress} failed={isFailed} />
+        <SyncStage label="Metadata cache" progress={task.status === "running" ? Math.max(12, task.progress - 28) : 100} failed={isFailed && !task.result} />
+      </div>
+      {task.message ? <p className="mt-2 text-xs">{task.message}</p> : null}
+      {task.result ? (
+        <div className="mt-2 text-xs">
+          {task.result.parse_job_count} metadata reads · {task.result.worker_count} workers · {task.result.removed_table_count} removed
+        </div>
+      ) : null}
+      {syncing ? <p className="mt-2 text-xs">Parsing runs in parallel; metadata cache writes stay serialized.</p> : null}
+      {task.result?.errors.length ? (
+        <div className="mt-2 space-y-1 text-xs">
+          {task.result.errors.slice(0, 3).map((error, index) => (
+            <div key={`${error.table ?? "table"}-${index}`}>
+              {error.table ? `${error.table}: ` : null}
+              {error.error}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SyncStage({ label, progress, failed }: { label: string; progress: number; failed: boolean }) {
+  return (
+    <div className="grid grid-cols-[8rem_1fr_2.5rem] items-center gap-2 text-xs">
+      <span>{label}</span>
+      <div className="h-1 overflow-hidden rounded-full bg-white/70">
+        <div className={`h-full rounded-full ${failed ? "bg-red-500" : "bg-current"}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+      </div>
+      <span className="text-right font-mono">{failed ? "fail" : `${Math.round(Math.min(100, Math.max(0, progress)))}%`}</span>
+    </div>
+  );
+}
+
+function syncResultMessage(result: TableIndexRefreshResult) {
+  return `Metadata sync finished for ${result.table_count} tables (${result.parsed_table_count} parsed, ${result.skipped_table_count} unchanged, ${result.failed_table_count} failed).`;
 }

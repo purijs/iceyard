@@ -43,12 +43,23 @@ export type TableMetricsRead = {
 
 export type TableRead = {
   id: string;
+  workspace_id: string;
   namespace_id: string;
+  catalog_connection_id: string | null;
   environment_id: string;
   name: string;
   location: string;
   format_version: number;
   current_snapshot_id: string | null;
+  table_uuid: string | null;
+  metadata_location: string | null;
+  previous_metadata_location: string | null;
+  last_sequence_number: number | null;
+  last_updated_at: string | null;
+  current_schema_id: number | null;
+  default_spec_id: number | null;
+  default_sort_order_id: number | null;
+  record_count: number | null;
   owner: string | null;
   properties: Record<string, unknown>;
   health_score: number;
@@ -118,8 +129,33 @@ export type TableIndexRefreshResult = {
   table_count: number;
   discovered_table_count: number;
   removed_table_count: number;
+  parsed_table_count: number;
+  skipped_table_count: number;
+  failed_table_count: number;
   mode: string;
+  sync_run_id: string | null;
   refreshed_at: string;
+  errors: Array<{ table?: string; error: string }>;
+  worker_count: number;
+  parse_job_count: number;
+};
+
+export type MetadataSyncRunRead = {
+  id: string;
+  workspace_id: string;
+  catalog_connection_id: string;
+  status: string;
+  mode: string;
+  started_at: string;
+  finished_at: string | null;
+  table_count: number;
+  discovered_table_count: number;
+  removed_table_count: number;
+  parsed_table_count: number;
+  skipped_table_count: number;
+  failed_table_count: number;
+  error: string | null;
+  stats: Record<string, unknown>;
 };
 
 export type EnvironmentRead = {
@@ -153,6 +189,17 @@ export type OperationDescriptor = {
   approval_required: boolean;
   restore_point_required: boolean;
   gates: string[];
+  docs_url: string | null;
+  scope: "catalog" | "namespace" | "table" | "none" | "governance" | "maintenance" | "migration";
+  requires_table: boolean;
+  requires_catalog: boolean;
+  writes_data: boolean;
+  writes_metadata: boolean;
+  native_metadata: boolean;
+  native_preview: boolean;
+  spark_required: boolean;
+  trino_supported: boolean;
+  flink_supported: boolean;
 };
 
 export type SnapshotRead = {
@@ -206,6 +253,18 @@ export type TablePreviewRead = {
   rows: Array<Record<string, unknown>>;
   rate_limited: boolean;
   masked_columns: string[];
+};
+
+export type TableMetadataRead = {
+  table: TableRead;
+  snapshots: SnapshotRead[];
+  refs: TableRefRead[];
+  schemas: SchemaVersionRead[];
+  partitions: PartitionSpecRead[];
+  sort_orders: SortOrderRead[];
+  metadata_log: Array<Record<string, unknown>>;
+  snapshot_log: Array<Record<string, unknown>>;
+  metrics: TableMetricsRead | null;
 };
 
 export type OperationCategoryRead = {

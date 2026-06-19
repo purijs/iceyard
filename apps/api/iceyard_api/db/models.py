@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -223,6 +224,15 @@ class IcebergTable(Base):
     location: Mapped[str] = mapped_column(String(700), nullable=False)
     format_version: Mapped[int] = mapped_column(Integer, nullable=False)
     current_snapshot_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    table_uuid: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    metadata_location: Mapped[str | None] = mapped_column(String(1200), nullable=True)
+    previous_metadata_location: Mapped[str | None] = mapped_column(String(1200), nullable=True)
+    last_sequence_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_schema_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_spec_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_sort_order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    record_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
     properties: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     health_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -235,6 +245,128 @@ class IcebergTable(Base):
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="table")
     refs: Mapped[list["TableRef"]] = relationship(back_populates="table")
 
+    @property
+    def catalog_connection_id(self) -> str | None:
+        return self.namespace.catalog_connection_id if self.namespace else None
+
+
+class MetadataSyncRun(Base):
+    __tablename__ = "metadata_sync_run"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    catalog_connection_id: Mapped[str] = mapped_column(
+        ForeignKey("catalog_connection.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    discovered_table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    removed_table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    parsed_table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    skipped_table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class MetadataLogEntry(Base):
+    __tablename__ = "metadata_log_entry"
+    __table_args__ = (
+        UniqueConstraint("table_id", "metadata_file", name="uq_metadata_log_table_file"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    table_id: Mapped[str] = mapped_column(ForeignKey("iceberg_table.id"), nullable=False)
+    timestamp_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    metadata_file: Mapped[str] = mapped_column(String(1200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SnapshotLogEntry(Base):
+    __tablename__ = "snapshot_log_entry"
+    __table_args__ = (
+        UniqueConstraint("table_id", "snapshot_id", "timestamp_ms", name="uq_snapshot_log_table"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    table_id: Mapped[str] = mapped_column(ForeignKey("iceberg_table.id"), nullable=False)
+    timestamp_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    snapshot_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ManifestFileCache(Base):
+    __tablename__ = "manifest_file_cache"
+    __table_args__ = (
+        UniqueConstraint("table_id", "snapshot_id", "manifest_path", name="uq_manifest_table_path"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    table_id: Mapped[str] = mapped_column(ForeignKey("iceberg_table.id"), nullable=False)
+    snapshot_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    manifest_path: Mapped[str] = mapped_column(String(1200), nullable=False)
+    content: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    partition_spec_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sequence_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    manifest_length: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    added_files_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    existing_files_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    deleted_files_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    added_rows_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    existing_rows_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    deleted_rows_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    partitions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TableFileCache(Base):
+    __tablename__ = "table_file_cache"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    table_id: Mapped[str] = mapped_column(ForeignKey("iceberg_table.id"), nullable=False)
+    snapshot_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    manifest_path: Mapped[str | None] = mapped_column(String(1200), nullable=True)
+    entry_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    content: Mapped[str] = mapped_column(String(40), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1600), nullable=False)
+    file_format: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    spec_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    partition: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    record_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    file_size_in_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    column_sizes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    value_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    null_value_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    nan_value_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    lower_bounds: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    upper_bounds: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    key_metadata_present: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    split_offsets: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    equality_ids: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    sort_order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PartitionSummary(Base):
+    __tablename__ = "partition_summary"
+    __table_args__ = (
+        UniqueConstraint("table_id", "spec_id", "partition_key", name="uq_partition_summary"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    table_id: Mapped[str] = mapped_column(ForeignKey("iceberg_table.id"), nullable=False)
+    spec_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    partition_key: Mapped[str] = mapped_column(String(1000), nullable=False)
+    partition: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    record_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    total_size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    delete_file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
 
 class TableMetrics(Base):
     __tablename__ = "table_metrics"
@@ -244,7 +376,7 @@ class TableMetrics(Base):
         ForeignKey("iceberg_table.id"), unique=True, nullable=False
     )
     file_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    data_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    data_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     delete_file_count: Mapped[int] = mapped_column(Integer, nullable=False)
     snapshot_count: Mapped[int] = mapped_column(Integer, nullable=False)
     manifest_count: Mapped[int] = mapped_column(Integer, nullable=False)

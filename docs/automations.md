@@ -7,7 +7,7 @@ their APIs, and runtime status.
 
 | Subsystem | Module | What it does | Status |
 |---|---|---|---|
-| S1 · Layout & stats model | `layout/` | Per-table physical profile (small-file ratio, delete density, metadata weight, partition skew, per-column clustering depth) derived from the local index | Derived from indexed metadata; clustering depth & skew are clearly-labelled heuristics until per-file bounds come from a live catalog |
+| S1 · Layout & stats model | `layout/` | Per-table physical profile (small-file ratio, delete density, metadata weight, partition skew, per-column clustering depth) derived from synced metadata | Derived from synced metadata; clustering depth & skew are clearly-labelled heuristics until per-file bounds come from a live catalog |
 | S4 · Policy schema | `policies/` | Declarative `AutomationPolicy` (selector / trigger / action / guardrails / alerting) with CRUD + selector resolution | Real CRUD + audit; reconciliation/scheduling not yet executed |
 | S2 · Workload profile | `advisor/` | Predicate/join/group-by signal for predicate-aware advice | Hints-based only; engine query-log ingestion is a documented future adapter |
 | S3 · Before/after harness | — | Projection lives in the what-if engine; replay needs a real engine | Projection only |
@@ -45,9 +45,9 @@ dry-run / gate / approval / audit pipeline and appear in the command palette, CL
 
 - **Implemented:** API surface, request/response validation, RBAC gating, audit events, policy
   CRUD + selector resolution, Job creation for WAP, all scoring/projection math over the
-  indexed metadata, and the safety classification of every new operation.
+  synced metadata, and the safety classification of every new operation.
 - **Projected:** reclaimable bytes, delete %, and clustering depth are estimates over
-  indexed metadata unless a compatible live runtime provides measured results.
+  synced metadata unless a compatible live runtime provides measured results.
   Heavy operation execution remains disabled until a compute backend is configured.
 - **Not built yet:** engine query-log ingestion (S2), policy reconciliation/scheduling,
   S3 replay measurement, and engine-native MV creation (only the self-managed fallback is

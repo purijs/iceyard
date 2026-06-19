@@ -29,6 +29,7 @@ import type {
   SchemaVersionRead,
   SnapshotRead,
   SortOrderRead,
+  TableMetadataRead,
   TablePreviewRead,
   TableRead,
   TableRefRead
@@ -47,7 +48,17 @@ const DETAIL_TABS: Array<[DetailTab, string]> = [
   ["settings", "Settings"]
 ];
 
-const PREVIEW_RESOURCES = ["rows", "files", "manifests", "snapshots", "partitions", "refs", "position_deletes"];
+const PREVIEW_RESOURCES = [
+  "rows",
+  "files",
+  "delete_files",
+  "manifests",
+  "manifest_entries",
+  "snapshots",
+  "partitions",
+  "refs",
+  "metadata_log"
+];
 
 const MAINTENANCE_CARDS = [
   {
@@ -96,6 +107,8 @@ type DetailState = {
   schemas: SchemaVersionRead[];
   partitions: PartitionSpecRead[];
   sortOrders: SortOrderRead[];
+  metadataLog: Array<Record<string, unknown>>;
+  snapshotLog: Array<Record<string, unknown>>;
 };
 
 const EMPTY_DETAIL: DetailState = {
@@ -103,7 +116,9 @@ const EMPTY_DETAIL: DetailState = {
   refs: [],
   schemas: [],
   partitions: [],
-  sortOrders: []
+  sortOrders: [],
+  metadataLog: [],
+  snapshotLog: []
 };
 
 export function Tables({
@@ -134,9 +149,9 @@ export function Tables({
   const envById = useMemo(() => new Map(environments.map((env) => [env.id, env.name])), [environments]);
   const connectionForTable = useCallback(
     (table: TableRead) =>
-      context.catalogConnection?.environment_id === table.environment_id
+      context.catalogConnection?.id === table.catalog_connection_id
         ? context.catalogConnection
-        : connections.find((connection) => connection.environment_id === table.environment_id) ?? null,
+        : connections.find((connection) => connection.id === table.catalog_connection_id) ?? null,
     [connections, context.catalogConnection]
   );
   const namespaceCounts = useMemo(() => {
@@ -242,7 +257,7 @@ export function Tables({
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs text-zinc-500">{envById.get(table.environment_id) ?? "env"}</span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">{connectionForTable(table)?.name ?? "catalog"}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">{connectionForTable(table)?.name ?? "unknown"}</td>
                   <td className="px-4 py-3">
                     <Badge>v{table.format_version}</Badge>
                   </td>
@@ -297,15 +312,20 @@ function TableDetail({
     let cancelled = false;
     setDetail(EMPTY_DETAIL);
     setDetailError(null);
-    void Promise.all([
-      api.tableSnapshots(token, table.id),
-      api.tableRefs(token, table.id),
-      api.tableSchema(token, table.id),
-      api.tablePartitions(token, table.id),
-      api.tableSortOrders(token, table.id)
-    ])
-      .then(([snapshots, refs, schemas, partitions, sortOrders]) => {
-        if (!cancelled) setDetail({ snapshots, refs, schemas, partitions, sortOrders });
+    void api
+      .tableMetadata(token, table.id)
+      .then((metadata: TableMetadataRead) => {
+        if (!cancelled) {
+          setDetail({
+            snapshots: metadata.snapshots,
+            refs: metadata.refs,
+            schemas: metadata.schemas,
+            partitions: metadata.partitions,
+            sortOrders: metadata.sort_orders,
+            metadataLog: metadata.metadata_log,
+            snapshotLog: metadata.snapshot_log
+          });
+        }
       })
       .catch((err) => {
         if (!cancelled) setDetailError(err instanceof Error ? err.message : "Unable to load table detail.");
@@ -318,6 +338,7 @@ function TableDetail({
   useEffect(() => {
     if (tab !== "preview") return;
     let cancelled = false;
+    setPreview(null);
     setPreviewError(null);
     void api
       .tablePreview(token, table.id, previewResource)
@@ -353,10 +374,10 @@ function TableDetail({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-mono text-2xl text-zinc-950">{table.name}</h2>
               <span className="text-sm text-zinc-400">
-                {envName} / {connection?.name ?? "catalog"} / {connection?.catalog_type ?? "catalog"} / v{table.format_version}
+                {envName} / {connection?.name ?? "unknown catalog"} / {connection?.catalog_type ?? "catalog"} / v{table.format_version}
               </span>
             </div>
-            <div className="mt-1 truncate font-mono text-sm text-zinc-400">{table.location}</div>
+            <div className="mt-1 truncate font-mono text-sm text-zinc-400">{table.location || table.metadata_location || "metadata location not synced"}</div>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button onClick={() => setTab("preview")}>
@@ -393,14 +414,18 @@ function TableDetail({
         <div className="grid gap-4 lg:grid-cols-2">
           <Panel title="Properties">
             <dl className="space-y-3 text-sm">
+              <KeyValue label="Table UUID" value={table.table_uuid ?? "unknown"} />
+              <KeyValue label="Current snapshot" value={table.current_snapshot_id ?? "none"} />
+              <KeyValue label="Last commit" value={relativeDate(table.metrics?.last_commit_at)} />
+              <KeyValue label="Records" value={table.record_count?.toLocaleString() ?? "unknown"} />
               <KeyValue label="Data files" value={table.metrics?.file_count.toLocaleString()} />
               <KeyValue label="Data size" value={formatBytes(table.metrics?.data_size_bytes ?? 0)} />
               <KeyValue label="Delete files" value={table.metrics?.delete_file_count.toLocaleString()} />
               <KeyValue label="Snapshots" value={table.metrics?.snapshot_count.toLocaleString()} />
-              <KeyValue label="Small-file ratio" value={table.metrics?.small_file_ratio.toFixed(2)} />
-              <KeyValue label="Last compaction" value={relativeDate(table.metrics?.last_compaction_at)} />
+              <KeyValue label="Manifests" value={table.metrics?.manifest_count.toLocaleString()} />
               <KeyValue label="Partition spec" value={formatPartitionSpec(currentPartition)} />
               <KeyValue label="Sort order" value={formatSortOrder(currentSort)} />
+              <KeyValue label="Metadata file" value={table.metadata_location ?? "not synced"} />
             </dl>
           </Panel>
           <Panel title="Runtime context">
@@ -408,7 +433,7 @@ function TableDetail({
               <KeyValue label="Environment" value={envName} />
               <KeyValue label="Catalog connection" value={connection?.name ?? "unknown"} />
               <KeyValue label="Catalog type" value={connection?.catalog_type ?? "unknown"} />
-              <KeyValue label="Operation mode" value={context.isAll ? <Badge tone="neutral">all environments</Badge> : <Badge tone="healthy">scoped</Badge>} />
+              <KeyValue label="Runtime" value={<Badge tone="healthy">native metadata</Badge>} />
             </dl>
           </Panel>
           <div className="lg:col-span-2">
@@ -443,7 +468,7 @@ function TableDetail({
       ) : null}
 
       {tab === "schema" ? (
-        <Panel title="Schema" right={<Badge tone="warning">drift vs prod: +1 column</Badge>} pad={false}>
+        <Panel title="Schema" pad={false}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
@@ -458,13 +483,20 @@ function TableDetail({
               <tbody>
                 {schemaFields.map((field, index) => (
                   <tr key={String(field.name ?? index)} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-4 py-3 font-mono text-zinc-400">{index + 1}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-400">{String(field.id ?? field["field-id"] ?? index + 1)}</td>
                     <td className="px-4 py-3 font-mono text-zinc-900">{String(field.name ?? "")}</td>
                     <td className="px-4 py-3 font-mono text-zinc-600">{String(field.type ?? "")}</td>
                     <td className="px-4 py-3 text-zinc-600">{field.required ? "yes" : "no"}</td>
-                    <td className="px-4 py-3 text-zinc-500">{String(field.note ?? "")}</td>
+                    <td className="px-4 py-3 text-zinc-500">{schemaFieldNote(field)}</td>
                   </tr>
                 ))}
+                {!schemaFields.length ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-zinc-400" colSpan={5}>
+                      No schema has been synced for this table.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -485,21 +517,36 @@ function TableDetail({
             <dl className="space-y-3 text-sm">
               <KeyValue label="Field" value={formatPartitionSpec(currentPartition)} />
               <KeyValue label="Spec id" value={currentPartition?.spec_id ?? "none"} />
-              <KeyValue label="Partition skew" value={<Badge tone="warning">moderate</Badge>} />
               <KeyValue label="Sort order" value={formatSortOrder(currentSort)} />
             </dl>
           </Panel>
-          <Panel title="Recommendation">
-            <p className="text-sm text-zinc-600">
-              Two hot partitions hold 38% of files. Consider a sort-compaction on user_id to restore pruning, then re-evaluate the spec.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button onClick={() => onOpenOperation("rewrite_data_files", table)}>
-                <span className="inline-flex items-center gap-2">
-                  <Wrench size={15} />
-                  Plan sort compaction
-                </span>
-              </Button>
+          <Panel title="Partition specs" pad={false}>
+            <table className="w-full text-sm">
+              <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Spec id</th>
+                  <th className="px-4 py-2 font-medium">Current</th>
+                  <th className="px-4 py-2 font-medium">Fields</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.partitions.map((partition) => (
+                  <tr key={partition.id} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-3 font-mono">{partition.spec_id}</td>
+                    <td className="px-4 py-3">{partition.is_current ? <Badge tone="healthy">current</Badge> : null}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-700">{formatPartitionSpec(partition)}</td>
+                  </tr>
+                ))}
+                {!detail.partitions.length ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-zinc-400" colSpan={3}>
+                      No partition specs have been synced for this table.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+            <div className="flex flex-wrap gap-2 border-t border-zinc-200 p-4">
               <Button onClick={() => onOpenOperation("add_time_partition", table)}>Add partition field</Button>
               <Button onClick={() => onOpenOperation("replace_partition_field", table)}>Change granularity</Button>
             </div>
@@ -545,9 +592,12 @@ function TableDetail({
                       <Badge>{snapshot.operation}</Badge>
                     </td>
                     <td className="px-4 py-3 font-mono text-zinc-600">
-                      +{numberFromSummary(snapshot.summary, "added_files")} / -{numberFromSummary(snapshot.summary, "removed_files")}
+                      +{summaryNumber(snapshot.summary, ["added-data-files", "added_files", "added_files_count"])} / -
+                      {summaryNumber(snapshot.summary, ["deleted-data-files", "removed_files", "deleted_files_count"])}
                     </td>
-                    <td className="px-4 py-3 font-mono text-zinc-600">{signedBytes(numberFromSummary(snapshot.summary, "bytes"))}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-600">
+                      {formatBytes(summaryNumber(snapshot.summary, ["total-file-size", "added-files-size", "bytes"]))}
+                    </td>
                     <td className="px-4 py-3">{refsForSnapshot(detail.refs, snapshot.snapshot_id)}</td>
                     <td className="px-4 py-3 text-right">
                       {snapshot.snapshot_id !== table.current_snapshot_id ? (
@@ -562,6 +612,13 @@ function TableDetail({
                     </td>
                   </tr>
                 ))}
+                {!detail.snapshots.length ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-zinc-400" colSpan={7}>
+                      No retained snapshots have been synced for this table.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -591,6 +648,13 @@ function TableDetail({
                     <td className="px-4 py-3 font-mono text-zinc-600">{retentionLabel(ref.retention)}</td>
                   </tr>
                 ))}
+                {!detail.refs.length ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-zinc-400" colSpan={4}>
+                      No branches or tags have been synced for this table.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </Panel>
@@ -647,7 +711,7 @@ function TableDetail({
                 {resource}
               </button>
             ))}
-            <div className="ml-auto text-xs text-zinc-400">preview only - rate-limited - sensitive columns masked</div>
+            <div className="ml-auto text-xs text-zinc-400">metadata resources are cached; row preview is bounded and read-only</div>
           </div>
           {previewError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{previewError}</div> : null}
           <Panel title={<span className="font-mono">{preview?.query ?? "SELECT ..."}</span>} pad={false}>
@@ -657,38 +721,64 @@ function TableDetail({
       ) : null}
 
       {tab === "settings" ? (
-        <Panel title="Table properties" pad={false}>
-          <table className="w-full text-sm">
-            <tbody>
-              {Object.entries({
-                "write.target-file-size-bytes": 536870912,
-                "write.format.default": table.properties["write.format.default"] ?? "parquet",
-                "history.expire.max-snapshot-age-ms": 604800000,
-                "commit.retry.num-retries": 4,
-                owner: table.owner ?? "unassigned",
-                "sla.freshness": "15m",
-                ...table.properties
-              }).map(([key, value]) => (
-                <tr key={key} className="border-b border-zinc-100 last:border-0">
-                  <td className="px-4 py-3 font-mono text-zinc-500">{key}</td>
-                  <td className="px-4 py-3 font-mono text-zinc-900">{displayValue(value)}</td>
+        <div className="space-y-4">
+          <Panel title="Table properties" pad={false}>
+            <table className="w-full text-sm">
+              <tbody>
+                {Object.entries(table.properties ?? {}).map(([key, value]) => (
+                  <tr key={key} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-3 font-mono text-zinc-500">{key}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-900">{displayValue(value)}</td>
+                  </tr>
+                ))}
+                {!Object.keys(table.properties ?? {}).length ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-zinc-400" colSpan={2}>
+                      No table properties were found in the synced metadata.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+            <div className="flex flex-wrap gap-2 border-t border-zinc-200 p-4">
+              <Button onClick={() => onOpenOperation("set_tblproperties", table)}>
+                <span className="inline-flex items-center gap-2">
+                  <Settings size={15} />
+                  Set property
+                </span>
+              </Button>
+              <Button onClick={() => onOpenOperation("unset_tblproperties", table)}>Unset property</Button>
+              <Button onClick={() => onOpenOperation("upgrade_format", table)} variant="danger">
+                Upgrade format
+              </Button>
+            </div>
+          </Panel>
+          <Panel title="Metadata log" pad={false}>
+            <table className="w-full text-sm">
+              <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Timestamp</th>
+                  <th className="px-4 py-2 font-medium">Metadata file</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex flex-wrap gap-2 border-t border-zinc-200 p-4">
-            <Button onClick={() => onOpenOperation("set_tblproperties", table)}>
-              <span className="inline-flex items-center gap-2">
-                <Settings size={15} />
-                Set property
-              </span>
-            </Button>
-            <Button onClick={() => onOpenOperation("unset_tblproperties", table)}>Unset property</Button>
-            <Button onClick={() => onOpenOperation("upgrade_format", table)} variant="danger">
-              Upgrade format
-            </Button>
-          </div>
-        </Panel>
+              </thead>
+              <tbody>
+                {detail.metadataLog.map((entry, index) => (
+                  <tr key={`${String(entry.metadata_file)}-${index}`} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-3 font-mono text-zinc-600">{metadataTimestamp(entry.timestamp_ms)}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-900">{displayValue(entry.metadata_file)}</td>
+                  </tr>
+                ))}
+                {!detail.metadataLog.length ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-zinc-400" colSpan={2}>
+                      No prior metadata files were found in the synced metadata log.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </Panel>
+        </div>
       ) : null}
     </div>
   );
@@ -730,6 +820,9 @@ function KeyValue({ label, value }: { label: string; value: ReactNode }) {
 function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
   if (!preview) {
     return <div className="p-8 text-center text-sm text-zinc-400">Loading preview...</div>;
+  }
+  if (!preview.columns.length || !preview.rows.length) {
+    return <div className="p-8 text-center text-sm text-zinc-400">No rows are available for this preview resource.</div>;
   }
   return (
     <div className="overflow-x-auto">
@@ -829,14 +922,28 @@ function displayValue(value: unknown) {
   return String(value);
 }
 
-function numberFromSummary(summary: Record<string, unknown>, key: string) {
-  const value = summary[key];
-  return typeof value === "number" ? value : Number(value ?? 0);
+function schemaFieldNote(field: Record<string, unknown>) {
+  const parts = [
+    field.doc,
+    field["initial-default"] !== undefined ? `initial default ${displayValue(field["initial-default"])}` : null,
+    field["write-default"] !== undefined ? `write default ${displayValue(field["write-default"])}` : null
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
-function signedBytes(bytes: number) {
-  const sign = bytes > 0 ? "+" : bytes < 0 ? "-" : "";
-  return `${sign} ${formatBytes(Math.abs(bytes))}`;
+function summaryNumber(summary: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = summary[key];
+    const number = typeof value === "number" ? value : Number(value ?? Number.NaN);
+    if (!Number.isNaN(number)) return number;
+  }
+  return 0;
+}
+
+function metadataTimestamp(value: unknown) {
+  const millis = typeof value === "number" ? value : Number(value ?? Number.NaN);
+  if (Number.isNaN(millis)) return "";
+  return formatDateTime(new Date(millis).toISOString());
 }
 
 function refsForSnapshot(refs: TableRefRead[], snapshotId: string) {

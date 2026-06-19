@@ -1,10 +1,10 @@
-import json
 import sys
 import types
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from iceyard_api.connections.service import ConnectionService
 from iceyard_api.db.models import CatalogConnection, SecretReference
 from iceyard_api.db.session import SessionLocal
 
@@ -13,7 +13,7 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
     headers = {"Authorization": f"Bearer {token}"}
     env = client.post(
         "/api/v1/environments",
-        json={"name": "dev", "kind": "dev", "region": "eu-central-1"},
+        json={"name": "lifecycle-dev", "kind": "dev", "region": "eu-central-1"},
         headers=headers,
     )
     assert env.status_code == 201, env.text
@@ -23,7 +23,7 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
         "/api/v1/connections/catalogs",
         json={
             "environment_id": env_id,
-            "name": "catalog-a",
+            "name": "lifecycle-catalog",
             "catalog_type": "rest",
             "endpoint": "https://catalog.internal",
             "warehouse": "s3://warehouse-a",
@@ -228,7 +228,12 @@ def test_catalog_connection_trims_inline_secret_values(
             select(SecretReference).where(SecretReference.id == connection.auth_ref)
         )
         assert secret is not None
-        assert json.loads(secret.reference)["password"] == "copied-password"
+        assert (
+            ConnectionService(session)._read_inline_secret(connection.workspace_id, secret.id)[
+                "password"
+            ]
+            == "copied-password"
+        )
 
 
 def test_jdbc_require_ssl_does_not_use_default_postgres_root_cert(

@@ -9,6 +9,7 @@ from iceyard_api.audit.service import AuditService
 from iceyard_api.core.logging import current_correlation_id
 from iceyard_api.db.models import (
     ApprovalRequest,
+    ComputeBackend,
     IcebergTable,
     Job,
     JobLog,
@@ -219,6 +220,14 @@ class OperationService:
                 job_id=None,
                 approval_request_id=None,
             )
+        runtime = self._resolve_runtime(descriptor, request)
+        if runtime["status"] == "blocked":
+            return OperationExecuteRead(
+                status="blocked",
+                message=runtime["message"],
+                job_id=None,
+                approval_request_id=None,
+            )
         if descriptor.approval_required:
             approval = ApprovalRequest(
                 workspace_id=actor.workspace_id,
@@ -272,7 +281,7 @@ class OperationService:
         run = JobRun(
             job_id=job.id,
             status="queued",
-            engine="internal_worker",
+            engine=runtime["engine"],
             compiled_command=request.compiled_command,
             dry_run=False,
             pre_op_restore_ref=restore_ref,
@@ -285,8 +294,9 @@ class OperationService:
                 job_run_id=run.id,
                 level="info",
                 message=(
-                    "Job queued. The executor is a local placeholder "
-                    "until compute backends are configured."
+                    f"Job queued through {runtime['label']}. Metadata-native work uses the "
+                    "selected catalog connection; heavy rewrites require a configured "
+                    "compute backend."
                 ),
             )
         )
@@ -319,13 +329,72 @@ class OperationService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Table not found.")
         return table
 
+    def _resolve_runtime(
+        self,
+        descriptor: OperationDescriptor,
+        request: OperationRequest,
+    ) -> dict[str, str]:
+        requires_compute = (
+            descriptor.spark_required
+            or (descriptor.writes_data and not descriptor.native_metadata)
+            or descriptor.safety_class in {"REWRITE", "DESTRUCTIVE"}
+        )
+        if not requires_compute:
+            return {
+                "status": "ready",
+                "engine": "internal_worker",
+                "label": "the internal worker",
+                "message": "",
+            }
+        if not request.table_id:
+            return {
+                "status": "blocked",
+                "engine": "unavailable",
+                "label": "no runtime",
+                "message": "This operation requires a selected table to resolve compute runtime.",
+            }
+        table = self.session.get(IcebergTable, request.table_id)
+        if not table:
+            return {
+                "status": "blocked",
+                "engine": "unavailable",
+                "label": "no runtime",
+                "message": "The target table is no longer available.",
+            }
+        backend = self.session.scalar(
+            select(ComputeBackend)
+            .where(
+                ComputeBackend.workspace_id == request.workspace_id,
+                ComputeBackend.environment_id == table.environment_id,
+                ComputeBackend.is_enabled.is_(True),
+                ComputeBackend.backend_type.in_(("spark", "trino")),
+            )
+            .order_by(ComputeBackend.created_at.desc())
+        )
+        if not backend:
+            return {
+                "status": "blocked",
+                "engine": "requires_compute_backend",
+                "label": "no compute backend",
+                "message": (
+                    "This operation requires an enabled Spark or Trino compute backend for the "
+                    "table environment."
+                ),
+            }
+        return {
+            "status": "ready",
+            "engine": backend.backend_type,
+            "label": f"{backend.backend_type} backend {backend.name}",
+            "message": "",
+        }
+
     def _requires_table(self, descriptor: OperationDescriptor) -> bool:
         template_fields = {
             field
             for _, field, _, _ in Formatter().parse(descriptor.sql_template)
             if field is not None
         }
-        return bool({"table", "qualified_table"} & template_fields)
+        return descriptor.requires_table and bool({"table", "qualified_table"} & template_fields)
 
     def _params_with_defaults(
         self, descriptor: OperationDescriptor, params: dict[str, object]
@@ -385,11 +454,11 @@ class OperationService:
                 detail = "Approval must be granted before execution."
             if gate == "retention_window_min_3_days":
                 detail = (
-                    "Retention window validation placeholder passed; "
-                    "live storage checks are not enabled."
+                    "Retention window validation passed for this dry-run. Live storage deletion "
+                    "checks run when an execution backend is configured."
                 )
             if gate == "path_authority_check":
-                detail = "Path and authority validation placeholder passed."
+                detail = "Path and authority validation passed for this dry-run."
                 location = params.get("location")
                 if (
                     table
@@ -400,7 +469,7 @@ class OperationService:
                     status_value = "blocked"
                     detail = "Requested location does not match the table storage authority."
             if gate == "reader_compatibility_check":
-                detail = "Reader compatibility validation placeholder passed."
+                detail = "Reader compatibility validation passed for this dry-run."
                 if table and params.get("target_version") == 3 and table.format_version < 3:
                     status_value = "pending"
                     detail = "Reader compatibility review is required before v3 upgrade."

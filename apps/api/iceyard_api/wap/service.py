@@ -108,14 +108,16 @@ class WapService:
             return WapCheckResult(
                 type=check.type,
                 status="passed" if ok else "failed",
-                detail=f"{file_count} files indexed (proxy for volume; min={min_files})",
+                detail=f"{file_count} files in synced metadata (proxy for volume; min={min_files})",
             )
         if check.type == "freshness":
             max_lag_hours = _as_number(check.params.get("max_lag_hours", 24), 24)
             last_commit = table.metrics.last_commit_at if table.metrics else None
             if not last_commit:
                 return WapCheckResult(
-                    type=check.type, status="skipped", detail="no commit timestamp indexed"
+                    type=check.type,
+                    status="skipped",
+                    detail="no commit timestamp in synced metadata",
                 )
             committed = last_commit if last_commit.tzinfo else last_commit.replace(tzinfo=UTC)
             lag_hours = (utcnow() - committed).total_seconds() / 3600

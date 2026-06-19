@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # The operation-descriptor registry is Apache-2.0 licensed (see LICENSING.md) so the
 # catalog can be reused freely by the CLI, Terraform provider, and integrations.
+from string import Formatter
+
 from iceyard_api.operations.schemas import OperationDescriptor
 
 E_SQL = ["spark", "trino", "flink", "embedded"]
@@ -88,6 +90,27 @@ def op(
 ) -> dict[str, object]:
     destructive = safety_class == "DESTRUCTIVE"
     rewrite = safety_class == "REWRITE"
+    template_fields = {field for _, field, _, _ in Formatter().parse(sql_template) if field}
+    requires_table = bool({"table", "qualified_table"} & template_fields)
+    if category in {"Namespace"}:
+        scope = "namespace" if requires_table else "catalog"
+    elif category in {"Maintenance", "Tuning", "Retention"}:
+        scope = "maintenance"
+    elif category in {"Migration", "Views"}:
+        scope = "migration"
+    elif not requires_table:
+        scope = "catalog"
+    else:
+        scope = "table"
+    native_metadata = safety_class in {"READ", "METADATA"} and category in {
+        "Namespace",
+        "Table DDL",
+        "Schema",
+        "Partition",
+        "Metadata tables",
+        "Branch and tag",
+        "Snapshots",
+    }
     return {
         "id": id_,
         "name": name,
@@ -106,6 +129,18 @@ def op(
         if restore_point_required is None
         else restore_point_required,
         "gates": default_gates(safety_class, gates),
+        "scope": scope,
+        "requires_table": requires_table,
+        "requires_catalog": not requires_table,
+        "writes_data": safety_class in {"WRITE", "REWRITE", "DESTRUCTIVE"},
+        "writes_metadata": safety_class in {"METADATA", "WRITE", "REWRITE", "DESTRUCTIVE"},
+        "native_metadata": native_metadata,
+        "native_preview": safety_class == "READ" and category == "Metadata tables",
+        "spark_required": (
+            safety_class in {"REWRITE", "DESTRUCTIVE"} and "spark" in supported_engines
+        ),
+        "trino_supported": "trino" in supported_engines,
+        "flink_supported": "flink" in supported_engines,
     }
 
 

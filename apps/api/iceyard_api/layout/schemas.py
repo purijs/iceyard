@@ -21,7 +21,7 @@ class LayoutDimension(BaseModel):
 class LayoutProfileRead(BaseModel):
     """Compact physical-state profile for a table (S1).
 
-    Derived from the indexed metadata (TableMetrics + snapshots). It is a
+    Derived from synced metadata (TableMetrics + snapshots). It is a
     rebuildable cache substrate, not a live catalog read; values flagged with
     ``basis="heuristic"`` are directional projections, not measured facts.
     """
@@ -42,6 +42,6 @@ class LayoutProfileRead(BaseModel):
     clustering: list[ClusteringCandidate]
     derived: bool = True
     note: str = (
-        "Derived from the local index; clustering depth and skew are heuristics "
+        "Derived from synced metadata; clustering depth and skew are heuristics "
         "until per-file bounds are available from a live catalog connection."
     )

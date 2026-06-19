@@ -407,7 +407,7 @@ export function Automation({
         <InfoCard
           icon={<Gauge size={18} className="text-zinc-500" />}
           title="Projections, not promises"
-          body="What-if and advisor outputs are directional projections over indexed metadata; validate after applying."
+          body="What-if and advisor outputs are directional projections over synced metadata; validate after applying."
         />
       </div>
     </div>
