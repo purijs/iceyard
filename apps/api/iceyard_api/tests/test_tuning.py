@@ -27,7 +27,7 @@ def test_parquet_advice_recommends_zstd(client: TestClient, token: str) -> None:
 
 
 def test_distribution_advice_for_small_file_table(client: TestClient, token: str) -> None:
-    table = _table(client, token, "sales.orders")  # high small-file ratio fixture
+    table = _table(client, token, "sales.orders")
     response = client.get(
         f"/api/v1/tables/{table['id']}/distribution-advice", headers=_auth(token)
     )

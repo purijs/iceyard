@@ -23,7 +23,6 @@ def test_retention_simulation_excludes_protected_snapshots(client: TestClient, t
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    # Fixtures tag snapshot 7588120049923847 (pre-compaction-restore) + a release tag.
     assert body["expiring_count"] >= 0
     assert body["reclaimable_basis"] == "estimate_from_summary"
     protected_ids = {snap["snapshot_id"] for snap in body["protected_excluded"]}
@@ -55,7 +54,7 @@ def test_cleanup_preview_partition_aligned_for_event_time(client: TestClient, to
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["partition_aligned"] is True  # fixtures partition by days(occurred_at)
+    assert body["partition_aligned"] is True
     assert body["recommend_partitioning"] is False
 
 

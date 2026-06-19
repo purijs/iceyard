@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from iceyard_api.db.models import IcebergTable, Job, TableMetrics
+from iceyard_api.db.models import CatalogConnection, IcebergTable, Job, Namespace, TableMetrics
 from iceyard_api.health.schemas import DashboardRead, HealthDimension, HealthFinding, HealthRead
 from iceyard_api.iceberg.service import IcebergIndexService
 
@@ -146,7 +146,14 @@ class HealthService:
             )
         storage_bytes = int(
             self.session.scalar(
-                select(func.coalesce(func.sum(TableMetrics.data_size_bytes), 0)).join(IcebergTable)
+                select(func.coalesce(func.sum(TableMetrics.data_size_bytes), 0))
+                .join(IcebergTable)
+                .join(Namespace, IcebergTable.namespace_id == Namespace.id)
+                .join(CatalogConnection, Namespace.catalog_connection_id == CatalogConnection.id)
+                .where(
+                    IcebergTable.workspace_id == workspace_id,
+                    CatalogConnection.workspace_id == workspace_id,
+                )
             )
             or 0
         )

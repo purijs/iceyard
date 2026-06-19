@@ -1,7 +1,7 @@
 # Iceyard — Performance, Layout & Lifecycle Automations
 
 This document describes the automation features added on top of the core control plane,
-their APIs, and — importantly — **what is real versus mocked** in this build.
+their APIs, and runtime status.
 
 ## Shared subsystems
 
@@ -41,15 +41,14 @@ dry-run / gate / approval / audit pipeline and appear in the command palette, CL
 - `backfill_default` (WRITE — affected-row estimate + restore point)
 - `create_summary_table` (WRITE), `refresh_summary_table` (REWRITE)
 
-## What is real vs mocked
+## Runtime status
 
-- **Real:** API surface, request/response validation, RBAC gating, audit events, policy
+- **Implemented:** API surface, request/response validation, RBAC gating, audit events, policy
   CRUD + selector resolution, Job creation for WAP, all scoring/projection math over the
   indexed metadata, and the safety classification of every new operation.
-- **Mocked / projected:** the underlying Iceberg data is the existing in-memory index
-  (no live catalog connection), so reclaimable bytes, delete %, and clustering depth are
-  **estimates/heuristics**, clearly labelled in each response's `note`/`basis` fields.
-  Operation execution remains a placeholder executor — nothing rewrites real files.
+- **Projected:** reclaimable bytes, delete %, and clustering depth are estimates over
+  indexed metadata unless a compatible live runtime provides measured results.
+  Heavy operation execution remains disabled until a compute backend is configured.
 - **Not built yet:** engine query-log ingestion (S2), policy reconciliation/scheduling,
   S3 replay measurement, and engine-native MV creation (only the self-managed fallback is
   modelled).

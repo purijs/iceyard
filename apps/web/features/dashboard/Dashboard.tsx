@@ -2,18 +2,23 @@
 
 import { AlertTriangle } from "lucide-react";
 
-import { Badge, formatBytes, Panel, toneForScore } from "@/components/ui";
-import type { DashboardRead, TableRead } from "@/types/api";
+import { Badge, formatBytes, Panel } from "@/components/ui";
+import type { JobRead, TableRead } from "@/types/api";
+import type { ControlContext } from "@/app/page";
 
-export function Dashboard({ dashboard, tables }: { dashboard: DashboardRead | null; tables: TableRead[] }) {
+export function Dashboard({ tables, jobs, context }: { tables: TableRead[]; jobs: JobRead[]; context: ControlContext }) {
+  const storageBytes = tables.reduce((sum, table) => sum + (table.metrics?.data_size_bytes ?? 0), 0);
+  const issueRows = tables
+    .map((table) => ({ table, issue: primaryIssue(table), severity: issueSeverity(table) }))
+    .filter((row) => row.issue !== "No open issue");
+  const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
   const stats = [
-    ["Tables managed", dashboard?.table_count ?? tables.length, "indexed tables"],
-    ["Fleet health", dashboard?.average_health ?? 0, "weighted score"],
-    ["Needs attention", dashboard?.needs_attention ?? 0, "below 80"],
-    ["Storage", formatBytes(dashboard?.storage_bytes ?? 0), "under management"],
-    ["Active jobs", dashboard?.active_jobs ?? 0, "queued or running"]
+    ["Tables", tables.length, context.isAll ? "all scoped catalogs" : context.label],
+    ["Storage", formatBytes(storageBytes), "indexed table data"],
+    ["Open issues", issueRows.length, "maintenance signals"],
+    ["Active jobs", activeJobs, "queued or running"],
+    ["Scope", context.isAll ? "Summary" : "Catalog", context.label]
   ];
-  const risks = tables.filter((table) => table.health_score < 80).sort((a, b) => a.health_score - b.health_score).slice(0, 5);
 
   return (
     <div className="space-y-4">
@@ -21,68 +26,112 @@ export function Dashboard({ dashboard, tables }: { dashboard: DashboardRead | nu
         {stats.map(([label, value, sub]) => (
           <Panel key={label as string}>
             <div className="text-xs text-zinc-500">{label}</div>
-            <div className="mt-1 text-2xl font-semibold text-zinc-950">{value}</div>
-            <div className="mt-0.5 text-xs text-zinc-400">{sub}</div>
+            <div className="mt-1 truncate text-2xl font-semibold text-zinc-950">{value}</div>
+            <div className="mt-0.5 truncate text-xs text-zinc-400">{sub}</div>
           </Panel>
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Health distribution">
+        <Panel title="Issue mix">
           <div className="space-y-2 text-sm">
             {[
-              ["Healthy", tables.filter((table) => table.health_score >= 80).length, "healthy"],
-              ["Warning", tables.filter((table) => table.health_score >= 55 && table.health_score < 80).length, "warning"],
-              ["Critical", tables.filter((table) => table.health_score < 55).length, "critical"]
+              ["Small files", tables.filter((table) => (table.metrics?.small_file_ratio ?? 0) >= 0.4).length, "warning"],
+              ["Delete pressure", tables.filter((table) => (table.metrics?.delete_file_count ?? 0) > 100).length, "warning"],
+              ["Snapshot pressure", tables.filter((table) => (table.metrics?.snapshot_count ?? 0) > 80).length, "critical"],
+              ["Unassigned owner", tables.filter((table) => !table.owner).length, "critical"]
             ].map(([label, count, tone]) => (
               <div key={label as string} className="flex items-center justify-between">
                 <span className="text-zinc-600">{label}</span>
-                <Badge tone={tone as "healthy" | "warning" | "critical"}>{count}</Badge>
+                <Badge tone={tone as "warning" | "critical"}>{count}</Badge>
               </div>
             ))}
           </div>
         </Panel>
-        <Panel title="Fleet health trend">
-          <div className="flex h-32 items-center justify-center text-sm text-zinc-400">Trend data will load after scheduled health checks run.</div>
-        </Panel>
-        <Panel title="Alerts" right={<Badge tone="critical">1 blocking</Badge>}>
-          <div className="space-y-3 text-sm text-zinc-600">
-            <div className="flex gap-2">
-              <AlertTriangle size={15} className="mt-0.5 text-red-600" />
-              <span>Orphan cleanup remains blocked until path authority checks pass.</span>
+        <Panel title="Runtime context">
+          <div className="space-y-2 text-sm text-zinc-600">
+            <div className="flex items-center justify-between gap-3">
+              <span>Environment</span>
+              <span className="font-mono text-zinc-900">{context.environment?.name ?? "all"}</span>
             </div>
-            <div className="flex gap-2">
-              <AlertTriangle size={15} className="mt-0.5 text-amber-600" />
-              <span>Format v3 promotions require reader compatibility review.</span>
+            <div className="flex items-center justify-between gap-3">
+              <span>Catalog</span>
+              <span className="font-mono text-zinc-900">{context.catalogConnection?.name ?? "all"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span>Mode</span>
+              <span className="font-mono text-zinc-900">{context.isAll ? "summary" : "scoped"}</span>
             </div>
           </div>
         </Panel>
+        <Panel title="Alerts" right={issueRows.length ? <Badge tone="warning">{issueRows.length} open</Badge> : null}>
+          <div className="space-y-3 text-sm text-zinc-600">
+            {issueRows.slice(0, 3).map(({ table, issue, severity }) => (
+              <div key={`${table.id}-${issue}`} className="flex gap-2">
+                <AlertTriangle size={15} className={`mt-0.5 ${severity === "critical" ? "text-red-600" : "text-amber-600"}`} />
+                <span>
+                  <span className="font-mono text-zinc-800">{table.name}</span> · {issue}
+                </span>
+              </div>
+            ))}
+            {!issueRows.length ? <div className="text-zinc-400">No open maintenance signals in this scope.</div> : null}
+          </div>
+        </Panel>
       </div>
-      <Panel title="Top risks" right={<span className="text-xs text-zinc-400">ranked by health impact</span>} pad={false}>
+      <Panel title="Recommended maintenance" right={<span className="text-xs text-zinc-400">ranked by issue severity</span>} pad={false}>
         <table className="w-full text-sm">
           <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
             <tr>
               <th className="px-4 py-2 font-medium">Table</th>
               <th className="px-4 py-2 font-medium">Primary issue</th>
+              <th className="px-4 py-2 font-medium">Recommended action</th>
               <th className="px-4 py-2 font-medium">Owner</th>
-              <th className="px-4 py-2 font-medium">Health</th>
             </tr>
           </thead>
           <tbody>
-            {risks.map((table) => (
+            {issueRows.slice(0, 6).map(({ table, issue, severity }) => (
               <tr key={table.id} className="border-b border-zinc-100 last:border-0">
                 <td className="px-4 py-2.5 font-mono text-zinc-900">{table.name}</td>
-                <td className="px-4 py-2.5 text-zinc-600">
-                  {table.metrics && table.metrics.small_file_ratio > 0.4 ? `small-file ratio ${table.metrics.small_file_ratio}` : "metadata hygiene"}
-                </td>
-                <td className="px-4 py-2.5 text-zinc-600">{table.owner ?? <span className="text-amber-700">unassigned</span>}</td>
                 <td className="px-4 py-2.5">
-                  <Badge tone={toneForScore(table.health_score)}>{table.health_score}</Badge>
+                  <Badge tone={severity === "critical" ? "critical" : "warning"}>{issue}</Badge>
                 </td>
+                <td className="px-4 py-2.5 text-zinc-600">{recommendedAction(table)}</td>
+                <td className="px-4 py-2.5 text-zinc-600">{table.owner ?? <span className="text-amber-700">unassigned</span>}</td>
               </tr>
             ))}
+            {!issueRows.length ? (
+              <tr>
+                <td className="px-4 py-8 text-center text-zinc-400" colSpan={4}>
+                  No recommendations in this context.
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </Panel>
     </div>
   );
+}
+
+function primaryIssue(table: TableRead) {
+  if (!table.owner) return "Owner missing";
+  if ((table.metrics?.snapshot_count ?? 0) > 80) return "Snapshot pressure";
+  if ((table.metrics?.small_file_ratio ?? 0) >= 0.4) return "Small files";
+  if ((table.metrics?.delete_file_count ?? 0) > 100) return "Delete pressure";
+  if (table.format_version >= 3) return "Format compatibility";
+  return "No open issue";
+}
+
+function issueSeverity(table: TableRead) {
+  if (!table.owner || (table.metrics?.snapshot_count ?? 0) > 100) return "critical";
+  if (primaryIssue(table) !== "No open issue") return "warning";
+  return "neutral";
+}
+
+function recommendedAction(table: TableRead) {
+  if (!table.owner) return "Assign owner";
+  if ((table.metrics?.snapshot_count ?? 0) > 80) return "Expire snapshots";
+  if ((table.metrics?.small_file_ratio ?? 0) >= 0.4) return "Compact data files";
+  if ((table.metrics?.delete_file_count ?? 0) > 100) return "Rewrite delete files";
+  if (table.format_version >= 3) return "Review reader compatibility";
+  return "Monitor";
 }

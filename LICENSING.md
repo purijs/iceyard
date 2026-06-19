@@ -1,13 +1,14 @@
 # Iceyard Licensing
 
 Iceyard is **open-core**. Different parts of the repository are under different licenses,
-and the running product behaves differently depending on its **edition**.
+and the running product behaves differently depending on its **edition**. The full
+Business Source License 1.1 text and Iceyard-specific parameters are in [`LICENSE`](LICENSE).
 
 ## Which license applies to what
 
 | Path | License | Why |
 |---|---|---|
-| `apps/api/` server (control plane) | **Business Source License 1.1 (BSL)** | Source-available and self-hostable, but not resellable as a competing managed service. Converts to Apache 2.0 on the Change Date. |
+| `apps/api/` server (control plane), except the Apache paths below | **Business Source License 1.1 (BSL)** | Source-available and self-hostable, but not resellable as a competing managed service. Converts to Apache 2.0 on the Change Date. |
 | `apps/api/iceyard_api/operations/` (operation-descriptor registry) | **Apache 2.0** | The descriptor catalog is meant to become a de-facto standard, so it stays permissively licensed. |
 | `apps/web/lib/`, `apps/web/types/` (client + API types / SDK surface) | **Apache 2.0** | Ecosystem/integration surface — connectors, CLI, Terraform should build on it freely. |
 | Everything else | **BSL 1.1** | Default for the commercial control plane. |
@@ -17,7 +18,7 @@ The full Apache 2.0 text is in [`LICENSE-APACHE`](LICENSE-APACHE).
 ### BSL parameters (our terms)
 
 - **Licensor:** Iceyard.
-- **Licensed Work:** the Iceyard control-plane server (this repo, excluding the Apache-2.0 paths above).
+- **Licensed Work:** the Iceyard control-plane server and all repository files, excluding the Apache-2.0 paths above.
 - **Additional Use Grant:** you may run the Licensed Work in production for your own data,
   **but you may not offer it to third parties as a hosted/managed service that competes with
   Iceyard's commercial offering.**

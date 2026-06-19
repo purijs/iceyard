@@ -79,6 +79,27 @@ export type CatalogConnectionRead = {
   last_tested_at: string | null;
 };
 
+export type ObjectStoreConnectionRead = {
+  id: string;
+  environment_id: string;
+  name: string;
+  store_type: "s3" | "gcs" | "adls" | "hdfs" | "local";
+  endpoint: string | null;
+  region: string | null;
+  auth_ref: string | null;
+  settings: Record<string, unknown>;
+};
+
+export type ComputeBackendRead = {
+  id: string;
+  environment_id: string;
+  name: string;
+  backend_type: "embedded" | "spark" | "trino" | "flink" | "duckdb" | "custom";
+  settings: Record<string, unknown>;
+  is_enabled: boolean;
+  created_at: string;
+};
+
 export type EnvironmentRead = {
   id: string;
   name: string;
@@ -192,6 +213,11 @@ export type OperationExecuteRead = {
 export type JobRead = {
   id: string;
   operation_request_id: string | null;
+  operation_id: string | null;
+  table_id: string | null;
+  table_name: string | null;
+  environment_id: string | null;
+  catalog_connection_id: string | null;
   kind: string;
   status: string;
   correlation_id: string | null;
@@ -224,12 +250,28 @@ export type JobLogRead = {
 
 export type AuditEventRead = {
   id: string;
+  workspace_id: string | null;
   action: string;
   resource_type: string;
   resource_id: string | null;
   actor_id: string | null;
+  before_state: Record<string, unknown> | null;
+  after_state: Record<string, unknown> | null;
   occurred_at: string;
   event_metadata: Record<string, unknown>;
+};
+
+export type ApprovalRead = {
+  id: string;
+  workspace_id: string;
+  operation_request_id: string;
+  requested_by: string | null;
+  reviewer_id: string | null;
+  status: string;
+  reason: string | null;
+  compiled_command_snapshot: string;
+  created_at: string;
+  reviewed_at: string | null;
 };
 
 export type RoleRead = {

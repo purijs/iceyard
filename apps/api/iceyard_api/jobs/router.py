@@ -5,11 +5,56 @@ from sqlalchemy.orm import Session
 from iceyard_api.audit.service import AuditService
 from iceyard_api.auth.dependencies import get_current_user
 from iceyard_api.core.time import utcnow
-from iceyard_api.db.models import Job, JobLog, JobRun, User
+from iceyard_api.db.models import (
+    IcebergTable,
+    Job,
+    JobLog,
+    JobRun,
+    Namespace,
+    OperationRequest,
+    User,
+)
 from iceyard_api.db.session import get_session
 from iceyard_api.jobs.schemas import JobLogRead, JobRead, JobRunRead
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def _read_job(session: Session, job: Job) -> JobRead:
+    operation_id = None
+    table_id = None
+    table_name = None
+    environment_id = None
+    catalog_connection_id = None
+    if job.operation_request_id:
+        request = session.get(OperationRequest, job.operation_request_id)
+        if request:
+            operation_id = request.operation_id
+            table_id = request.table_id
+            if request.table_id:
+                table = session.get(IcebergTable, request.table_id)
+                if table:
+                    table_name = table.name
+                    environment_id = table.environment_id
+                    namespace = session.get(Namespace, table.namespace_id)
+                    if namespace:
+                        catalog_connection_id = namespace.catalog_connection_id
+    return JobRead(
+        id=job.id,
+        workspace_id=job.workspace_id,
+        operation_request_id=job.operation_request_id,
+        operation_id=operation_id,
+        table_id=table_id,
+        table_name=table_name,
+        environment_id=environment_id,
+        catalog_connection_id=catalog_connection_id,
+        kind=job.kind,
+        status=job.status,
+        correlation_id=job.correlation_id,
+        created_by=job.created_by,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 @router.get("", response_model=list[JobRead])
@@ -17,13 +62,14 @@ def list_jobs(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> list[JobRead]:
-    return list(
+    jobs = list(
         session.scalars(
             select(Job)
             .where(Job.workspace_id == current_user.workspace_id)
             .order_by(Job.created_at.desc())
         )
     )
+    return [_read_job(session, job) for job in jobs]
 
 
 @router.get("/{job_id}/runs", response_model=list[JobRunRead])
@@ -83,4 +129,4 @@ def cancel_job(
         actor_id=current_user.id,
     )
     session.commit()
-    return job
+    return _read_job(session, job)

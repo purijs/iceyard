@@ -9,6 +9,11 @@ class JobRead(BaseModel):
     id: str
     workspace_id: str
     operation_request_id: str | None
+    operation_id: str | None = None
+    table_id: str | None = None
+    table_name: str | None = None
+    environment_id: str | None = None
+    catalog_connection_id: str | None = None
     kind: str
     status: str
     correlation_id: str | None

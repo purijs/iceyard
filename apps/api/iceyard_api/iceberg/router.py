@@ -25,6 +25,7 @@ router = APIRouter(prefix="/tables", tags=["tables"])
 @router.get("", response_model=list[TableRead])
 def list_tables(
     environment_id: str | None = Query(default=None),
+    catalog_connection_id: str | None = Query(default=None),
     namespace_id: str | None = Query(default=None),
     min_health: int | None = Query(default=None, ge=0, le=100),
     max_health: int | None = Query(default=None, ge=0, le=100),
@@ -34,6 +35,7 @@ def list_tables(
     return IcebergIndexService(session).list_tables(
         current_user.workspace_id,
         environment_id=environment_id,
+        catalog_connection_id=catalog_connection_id,
         namespace_id=namespace_id,
         min_health=min_health,
         max_health=max_health,

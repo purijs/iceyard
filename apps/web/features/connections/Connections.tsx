@@ -1,12 +1,13 @@
 "use client";
 
-import { CheckCircle2, Database, HardDrive, Lock, Plus, Server, X } from "lucide-react";
+import { Database, HardDrive, Lock, Plus, Server, Trash2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 import { Badge, Button, Panel } from "@/components/ui";
+import type { ControlContext } from "@/app/page";
 import { api } from "@/lib/api";
-import type { CatalogConnectionRead, EnvironmentRead } from "@/types/api";
+import type { CatalogConnectionRead, ComputeBackendRead, EnvironmentRead, ObjectStoreConnectionRead, TableRead } from "@/types/api";
 
 const CATALOGS = [
   ["rest", "REST", "Polaris - Unity - Lakekeeper - generic"],
@@ -39,9 +40,9 @@ const CAPABILITY_PREVIEW: Record<string, { good: string[]; bad: string[]; note: 
     note: "REST catalogs can vend credentials and centralize commit coordination when the server supports it."
   },
   jdbc: {
-    good: ["metadata read / write", "DML / DDL", "branch / tag ops", "in-process compaction"],
+    good: ["metadata read / write", "DML / DDL", "branch / tag ops", "controlled dry-runs"],
     bad: ["credential vending", "server-side commit deconflicting", "multi-table commits"],
-    note: "JDBC catalogs commit through the metadata DB directly. The control plane runs operations in-process."
+    note: "JDBC catalogs commit through the metadata DB directly. Data rewrite execution still needs an enabled runtime."
   },
   hive: {
     good: ["read / write", "schema evolution"],
@@ -95,22 +96,22 @@ type FormState = {
 };
 
 const DEFAULT_FORM: FormState = {
-  envName: "dev",
-  name: "dev-catalog",
+  envName: "",
+  name: "",
   catalog: "rest",
-  uri: "https://catalog.example.com",
-  warehouse: "s3://dev-lakehouse/wh",
+  uri: "",
+  warehouse: "",
   store: "s3",
-  region: "eu-central-1",
+  region: "",
   endpoint: "",
   accessStyle: "virtual-hosted",
-  sse: "kms",
-  kmsKeyArn: "arn:aws:kms:::key/",
+  sse: "none",
+  kmsKeyArn: "",
   credentialVending: true,
   remoteSigning: false,
   auth: "keyless",
-  identity: "arn:aws:iam:::role/iceberg-control-plane",
-  secretReference: "vault://secret/data/iceberg/dev",
+  identity: "",
+  secretReference: "",
   accessKeyId: ""
 };
 
@@ -118,15 +119,54 @@ export function Connections({
   token,
   environments,
   connections,
+  objectStores,
+  computeBackends,
+  tables,
+  context,
   onRefresh
 }: {
   token: string;
   environments: EnvironmentRead[];
   connections: CatalogConnectionRead[];
+  objectStores: ObjectStoreConnectionRead[];
+  computeBackends: ComputeBackendRead[];
+  tables: TableRead[];
+  context: ControlContext;
   onRefresh: () => Promise<void>;
 }) {
   const [showWizard, setShowWizard] = useState(false);
-  const envById = useMemo(() => new Map(environments.map((env) => [env.id, env])), [environments]);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const tablesByEnvironment = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const table of tables) counts.set(table.environment_id, (counts.get(table.environment_id) ?? 0) + 1);
+    return counts;
+  }, [tables]);
+
+  async function deleteConnection(connection: CatalogConnectionRead) {
+    if (!window.confirm(`Delete catalog connection "${connection.name}"? Indexed metadata for tables using it may need to be refreshed after reconnecting.`)) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await api.deleteCatalogConnection(token, connection.id);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to delete connection.");
+    }
+  }
+
+  async function deleteObjectStore(store: ObjectStoreConnectionRead) {
+    if (!window.confirm(`Delete storage connection "${store.name}"? Catalog connections linked to it should be updated first.`)) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await api.deleteObjectStoreConnection(token, store.id);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to delete storage connection.");
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -142,56 +182,162 @@ export function Connections({
         </Button>
       </div>
 
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-        <span className="inline-flex items-center gap-2">
-          <CheckCircle2 size={16} />
-          No physical-location collisions detected across connections. No table is registered in two catalogs.
-        </span>
-      </div>
+      {actionError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</div> : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {connections.map((connection) => {
-          const environment = envById.get(connection.environment_id);
+      <div className="space-y-4">
+        {environments.map((environment) => {
+          const envConnections = connections.filter((connection) => connection.environment_id === environment.id);
+          const envStores = objectStores.filter((store) => store.environment_id === environment.id);
+          const envBackends = computeBackends.filter((backend) => backend.environment_id === environment.id && backend.is_enabled);
           return (
             <Panel
-              key={connection.id}
+              key={environment.id}
               title={
                 <span className="flex items-center gap-2">
-                  {environment?.name ?? "environment"}
-                  <Badge tone={connection.is_enabled ? "healthy" : "neutral"}>{connection.is_enabled ? "connected" : "disabled"}</Badge>
+                  {environment.name}
+                  {environment.kind !== environment.name ? <Badge>{environment.kind}</Badge> : null}
                 </span>
               }
-              right={<span className="text-xs text-zinc-400">{connection.last_tested_at ? `tested ${new Date(connection.last_tested_at).toLocaleTimeString()}` : "not tested"}</span>}
+              right={<span className="text-xs text-zinc-400">{tablesByEnvironment.get(environment.id) ?? 0} indexed tables</span>}
             >
-              <dl className="space-y-3 text-sm">
-                <ConnectionRow icon={<Database size={15} />} label="Catalog" value={`${connection.catalog_type.toUpperCase()} - ${connection.settings.provider ?? "configured"}`} />
-                <ConnectionRow icon={<Server size={15} />} label="Catalog URI" value={connection.endpoint ?? "not set"} mono />
-                <ConnectionRow icon={<HardDrive size={15} />} label="Object storage" value={connection.warehouse ?? "not set"} mono />
-                <ConnectionRow label="Region" value={environment?.region ?? String(connection.settings.region ?? "not set")} />
-                <ConnectionRow label="Namespaces / tables" value={connection.catalog_type === "jdbc" ? "5 namespaces - 6 tables" : "probed after index refresh"} />
-              </dl>
-              <div className="mt-4 border-t border-zinc-100 pt-4">
-                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Capabilities probed</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {capabilityLabels(connection.capabilities).good.map((capability) => (
-                    <Badge key={capability} tone="healthy">
-                      {capability}
-                    </Badge>
+              <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+                <div className="space-y-3">
+                  {envConnections.map((connection) => (
+                    <div key={connection.id} className="rounded-md border border-zinc-200 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium text-zinc-900">{connection.name}</span>
+                          <span className="text-xs text-zinc-400">
+                            {connection.catalog_type} · {connection.is_enabled ? "connected" : "disabled"}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-xs text-zinc-400">
+                            {connection.last_tested_at ? `tested ${new Date(connection.last_tested_at).toLocaleTimeString()}` : "not tested"}
+                          </span>
+                          <Button variant="danger" onClick={() => void deleteConnection(connection)}>
+                            <Trash2 size={14} /> Delete
+                          </Button>
+                        </div>
+                      </div>
+                      <dl className="space-y-3 text-sm">
+                        <ConnectionRow icon={<Database size={15} />} label="Catalog" value={`${connection.catalog_type.toUpperCase()} - ${connection.settings.provider ?? "configured"}`} />
+                        <ConnectionRow icon={<Server size={15} />} label="Catalog URI" value={connection.endpoint ?? "not set"} mono />
+                        <ConnectionRow icon={<HardDrive size={15} />} label="Object storage" value={connection.warehouse ?? "not set"} mono />
+                        <ConnectionRow label="Region" value={environment.region ?? String(connection.settings.region ?? "not set")} />
+                        <ConnectionRow label="Indexed tables" value={tables.filter((table) => table.environment_id === environment.id).length} />
+                      </dl>
+                      <div className="mt-4 border-t border-zinc-100 pt-4">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Capabilities probed</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {capabilityLabels(connection.capabilities).good.map((capability) => (
+                            <Badge key={capability} tone="healthy">
+                              {capability}
+                            </Badge>
+                          ))}
+                          {capabilityLabels(connection.capabilities).bad.map((capability) => (
+                            <span key={capability} className="rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-xs text-zinc-400 line-through">
+                              {capability}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs text-zinc-400">{CAPABILITY_PREVIEW[connection.catalog_type]?.note ?? "Capabilities are driven by the connection probe."}</p>
+                    </div>
                   ))}
-                  {capabilityLabels(connection.capabilities).bad.map((capability) => (
-                    <span key={capability} className="rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-xs text-zinc-400 line-through">
-                      {capability}
-                    </span>
-                  ))}
+                  {!envConnections.length ? <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-400">No catalog connections in this environment.</div> : null}
+                  {envStores.length ? (
+                    <div className="rounded-md border border-zinc-200 p-3">
+                      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Manifest & table storage</div>
+                      <div className="space-y-2">
+                        {envStores.map((store) => (
+                          <div key={store.id} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm">
+                            <div className="min-w-0">
+                              <div className="font-medium text-zinc-900">{store.name}</div>
+                              <div className="truncate font-mono text-xs text-zinc-500">
+                                {store.store_type} · {String(store.settings.warehouse ?? store.endpoint ?? "no warehouse")}
+                              </div>
+                            </div>
+                            <Button variant="danger" onClick={() => void deleteObjectStore(store)}>
+                              <Trash2 size={14} /> Delete
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
+                <RuntimePanel environment={environment} connections={envConnections} computeBackends={envBackends} />
               </div>
-              <p className="mt-3 text-xs text-zinc-400">{CAPABILITY_PREVIEW[connection.catalog_type]?.note ?? "Capabilities are driven by the connection probe."}</p>
             </Panel>
           );
         })}
       </div>
 
       {showWizard ? <AddConnectionWizard token={token} environments={environments} onClose={() => setShowWizard(false)} onRefresh={onRefresh} /> : null}
+    </div>
+  );
+}
+
+function RuntimePanel({
+  environment,
+  connections,
+  computeBackends
+}: {
+  environment: EnvironmentRead;
+  connections: CatalogConnectionRead[];
+  computeBackends: ComputeBackendRead[];
+}) {
+  const hasWritableCatalog = connections.some((connection) => connection.is_enabled && connection.capabilities.can_update_table_via_protocol !== false);
+  return (
+    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+      <div className="mb-3 text-sm font-medium text-zinc-900">Runtime & execution</div>
+      <div className="space-y-2 text-sm">
+        <RuntimeRow
+          label="Native catalog operations"
+          value={hasWritableCatalog ? "enabled" : "unavailable"}
+          tone={hasWritableCatalog ? "healthy" : "neutral"}
+          detail={hasWritableCatalog ? "Metadata and catalog-scoped work use the selected catalog connection." : "No enabled catalog can update table metadata."}
+        />
+        <RuntimeRow
+          label="Internal worker"
+          value="enabled"
+          tone="healthy"
+          detail="Dry-runs, gate checks, approvals, audit, and metadata-safe queueing run inside the API service."
+        />
+        <RuntimeRow
+          label="Compute backend"
+          value={computeBackends.length ? computeBackends.map((backend) => backend.name).join(", ") : "not configured"}
+          tone={computeBackends.length ? "healthy" : "warning"}
+          detail={
+            computeBackends.length
+              ? `Heavy rewrites can target configured ${environment.name} compute backends when an adapter is enabled.`
+              : "Heavy data rewrites remain dry-run/approval-only until Spark, Trino, Flink, or a native backend is connected."
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function RuntimeRow({
+  label,
+  value,
+  detail,
+  tone
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: "neutral" | "healthy" | "warning" | "critical";
+}) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium text-zinc-800">{label}</span>
+        <Badge tone={tone}>{value}</Badge>
+      </div>
+      <p className="mt-1 text-xs text-zinc-500">{detail}</p>
     </div>
   );
 }
@@ -207,7 +353,10 @@ function AddConnectionWizard({
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
-  const [form, setForm] = useState<FormState>(DEFAULT_FORM);
+  const [form, setForm] = useState<FormState>(() => ({
+    ...DEFAULT_FORM,
+    envName: environments[0]?.name ?? ""
+  }));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const caps = CAPABILITY_PREVIEW[form.catalog];
@@ -219,6 +368,10 @@ function AddConnectionWizard({
   async function saveConnection() {
     setError(null);
     setMessage(null);
+    if (!form.envName || !form.name || !form.uri || !form.warehouse) {
+      setError("Environment, connection name, catalog URI, and warehouse are required.");
+      return;
+    }
     try {
       let environment = environments.find((item) => item.name === form.envName);
       if (!environment) {
@@ -232,6 +385,22 @@ function AddConnectionWizard({
           }
         });
       }
+      const objectStore = await api.createObjectStoreConnection(token, {
+        environment_id: environment.id,
+        name: `${form.name}-storage`,
+        store_type: form.store,
+        endpoint: form.endpoint || undefined,
+        region: form.region,
+        auth_ref: authRef(form) ?? undefined,
+        settings: {
+          warehouse: form.warehouse,
+          access_style: form.accessStyle,
+          server_side_encryption: form.sse,
+          kms_key_arn: form.kmsKeyArn,
+          credential_vending: form.credentialVending,
+          remote_signing: form.remoteSigning
+        }
+      });
       await api.createCatalogConnection(token, {
         environment_id: environment.id,
         name: form.name,
@@ -249,7 +418,8 @@ function AddConnectionWizard({
           credential_vending: form.credentialVending,
           remote_signing: form.remoteSigning,
           auth_mode: form.auth,
-          identity: form.auth === "keyless" ? form.identity : undefined
+          identity: form.auth === "keyless" ? form.identity : undefined,
+          object_store_connection_id: objectStore.id
         }
       });
       await onRefresh();
@@ -264,8 +434,10 @@ function AddConnectionWizard({
       <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg border border-zinc-200 bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3">
           <div>
-            <div className="text-sm font-medium text-zinc-900">Add connection</div>
-            <div className="mt-0.5 text-xs text-zinc-400">Connection test is read-only; secrets are stored by reference or encrypted before persistence.</div>
+            <div className="text-sm font-medium text-zinc-900">Add lakehouse connection</div>
+            <div className="mt-0.5 text-xs text-zinc-400">
+              Create the environment, catalog metadata connection, and manifest/table storage reference used by Iceyard.
+            </div>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100">
             <X size={16} />
@@ -274,31 +446,65 @@ function AddConnectionWizard({
 
         <div className="space-y-6 overflow-auto p-5">
           <div className="grid gap-3 md:grid-cols-3">
-            <Field label="connection name" value={form.name} onChange={(value) => set("name", value)} />
-            <Field label="environment" value={form.envName} onChange={(value) => set("envName", value)} />
-            <Field label="region" value={form.region} onChange={(value) => set("region", value)} />
+            <SetupStep
+              title="1. Environment"
+              body="A deployment boundary such as dev, staging, or prod. Policies and approvals key off this scope."
+            />
+            <SetupStep
+              title="2. Catalog metadata"
+              body="REST, JDBC, Glue, Hive, Nessie, S3 Tables, or Hadoop. JDBC points at the catalog database."
+            />
+            <SetupStep
+              title="3. Manifest storage"
+              body="Object storage or filesystem location where table metadata, manifests, and data files live."
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label="connection name" value={form.name} onChange={(value) => set("name", value)} placeholder="catalog name" />
+            <Field
+              label="environment"
+              value={form.envName}
+              onChange={(value) => set("envName", value)}
+              placeholder={environments.length ? environments.map((environment) => environment.name).join(", ") : "environment name"}
+              hint="Existing names are reused; new names are created."
+            />
+            <Field label="region" value={form.region} onChange={(value) => set("region", value)} placeholder="eu-central-1" />
           </div>
 
           <section className="space-y-3">
-            <Eyebrow>Catalog</Eyebrow>
+            <div>
+              <Eyebrow>Catalog metadata / database</Eyebrow>
+              <p className="mt-1 text-sm text-zinc-500">
+                This is the control-plane entrypoint for namespaces, table metadata, commits, snapshots, branches, and tags.
+              </p>
+            </div>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {CATALOGS.map(([value, label, sub]) => (
                 <Choice key={value} active={form.catalog === value} label={label} sub={sub} onClick={() => set("catalog", value)} />
               ))}
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label={catalogUriLabel(form.catalog)} value={form.uri} onChange={(value) => set("uri", value)} placeholder="https://catalog.example.com" />
-              <Field label="warehouse" value={form.warehouse} onChange={(value) => set("warehouse", value)} placeholder="s3://prod-lakehouse/wh" />
+              <Field label={catalogUriLabel(form.catalog)} value={form.uri} onChange={(value) => set("uri", value)} placeholder="catalog endpoint or JDBC URI" />
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                {catalogHelp(form.catalog)}
+              </div>
             </div>
           </section>
 
           <section className="space-y-3">
-            <Eyebrow>Storage</Eyebrow>
+            <div>
+              <Eyebrow>Manifest & table storage</Eyebrow>
+              <p className="mt-1 text-sm text-zinc-500">
+                This is the warehouse root or table bucket where Iceberg metadata JSON, manifests, delete files, and data files are stored.
+              </p>
+            </div>
             <div className="flex flex-wrap gap-2">
               {STORES.map(([value, label]) => (
                 <Choice key={value} active={form.store === value} label={label} onClick={() => set("store", value)} compact />
               ))}
             </div>
+            <Field label="warehouse / table bucket" value={form.warehouse} onChange={(value) => set("warehouse", value)} placeholder="warehouse URI" />
             {form.store === "s3" ? (
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="endpoint (S3-compatible)" value={form.endpoint} onChange={(value) => set("endpoint", value)} placeholder="https://... (blank = AWS)" />
@@ -336,7 +542,12 @@ function AddConnectionWizard({
           </section>
 
           <section className="space-y-3">
-            <Eyebrow>Authentication & secrets</Eyebrow>
+            <div>
+              <Eyebrow>Authentication & secrets</Eyebrow>
+              <p className="mt-1 text-sm text-zinc-500">
+                Prefer keyless identities or secret references. Static keys are supported for local/dev only and are never returned by API responses.
+              </p>
+            </div>
             <div className="grid gap-2 md:grid-cols-3">
               {AUTHS.map(([value, label, sub]) => (
                 <Choice key={value} active={form.auth === value} label={label} sub={sub} onClick={() => set("auth", value)} />
@@ -379,9 +590,9 @@ function AddConnectionWizard({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50 px-5 py-3">
-          <span className="text-xs text-zinc-400">Saving writes an audit event and stores no secret material in API responses.</span>
+          <span className="text-xs text-zinc-400">Saving creates a catalog connection and a linked storage reference, then writes audit events.</span>
           <div className="flex gap-2">
-            <Button onClick={() => setMessage("Connection settings passed local validation.")}>Test connection</Button>
+            <Button onClick={() => setMessage("Form looks complete. Live catalog probing runs after save.")}>Validate locally</Button>
             <Button variant="primary" onClick={saveConnection}>
               Save connection
             </Button>
@@ -418,12 +629,14 @@ function Field({
   label,
   value,
   onChange,
-  placeholder
+  placeholder,
+  hint
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  hint?: string;
 }) {
   return (
     <label className="block">
@@ -434,7 +647,17 @@ function Field({
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
       />
+      {hint ? <span className="mt-1 block text-xs text-zinc-400">{hint}</span> : null}
     </label>
+  );
+}
+
+function SetupStep({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+      <div className="text-sm font-medium text-zinc-900">{title}</div>
+      <p className="mt-1 text-xs text-zinc-500">{body}</p>
+    </div>
   );
 }
 
@@ -502,12 +725,34 @@ function authRef(form: FormState) {
 }
 
 function catalogUriLabel(catalog: CatalogType) {
-  if (catalog === "jdbc") return "jdbc uri";
+  if (catalog === "jdbc") return "JDBC catalog DB URI";
   if (catalog === "hive") return "thrift uri";
   if (catalog === "glue") return "glue catalog id";
   if (catalog === "s3_tables") return "table bucket ARN";
   if (catalog === "hadoop") return "warehouse path";
-  return "uri";
+  return "catalog endpoint";
+}
+
+function catalogHelp(catalog: CatalogType) {
+  if (catalog === "jdbc") {
+    return "Use the PostgreSQL/MySQL JDBC URI for the Iceberg catalog metadata database, for example jdbc:postgresql://host:5432/iceberg_catalog.";
+  }
+  if (catalog === "rest") {
+    return "Use the REST catalog endpoint. This can be Polaris, Unity, Lakekeeper, or a generic Iceberg REST catalog.";
+  }
+  if (catalog === "glue") {
+    return "Use the AWS account/catalog id and configure IAM or Lake Formation access through the auth section.";
+  }
+  if (catalog === "hive") {
+    return "Use the Hive Metastore Thrift endpoint. Storage access is configured separately below.";
+  }
+  if (catalog === "nessie") {
+    return "Use the Nessie API endpoint. Branching is catalog-level, while table storage remains configured below.";
+  }
+  if (catalog === "s3_tables") {
+    return "Use the S3 Tables bucket ARN. The provider manages parts of the catalog and maintenance path.";
+  }
+  return "Use the filesystem warehouse path for local or development catalogs.";
 }
 
 function capabilityLabels(capabilities: Record<string, unknown>) {

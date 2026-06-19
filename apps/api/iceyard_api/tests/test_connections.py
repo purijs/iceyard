@@ -15,10 +15,10 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
         "/api/v1/connections/catalogs",
         json={
             "environment_id": env_id,
-            "name": "dev-catalog",
+            "name": "catalog-a",
             "catalog_type": "rest",
-            "endpoint": "https://catalog.example.com",
-            "warehouse": "s3://dev-lakehouse",
+            "endpoint": "https://catalog.internal",
+            "warehouse": "s3://warehouse-a",
         },
         headers=headers,
     )

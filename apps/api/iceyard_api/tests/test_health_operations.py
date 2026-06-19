@@ -18,6 +18,18 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
     assert namespaces.status_code == 200
     assert {namespace["name"] for namespace in namespaces.json()} >= {"analytics", "sales"}
 
+    catalogs = client.get("/api/v1/connections/catalogs", headers=headers)
+    assert catalogs.status_code == 200
+    catalog = catalogs.json()[0]
+    catalog_tables = client.get(
+        f"/api/v1/tables?catalog_connection_id={catalog['id']}", headers=headers
+    )
+    assert catalog_tables.status_code == 200
+    assert catalog_tables.json()
+    assert all(
+        table["environment_id"] == catalog["environment_id"] for table in catalog_tables.json()
+    )
+
     filtered = client.get("/api/v1/tables?max_health=55", headers=headers)
     assert filtered.status_code == 200
     assert all(table["health_score"] <= 55 for table in filtered.json())
@@ -55,6 +67,20 @@ def test_tables_health_and_operations(client: TestClient, token: str) -> None:
     descriptor = client.get("/api/v1/operations/descriptors/rewrite_data_files", headers=headers)
     assert descriptor.status_code == 200
     assert descriptor.json()["safety_class"] == "REWRITE"
+
+    namespace_dry_run = client.post(
+        "/api/v1/operations/dry-run",
+        json={"operation_id": "create_namespace", "params": {"namespace": "sandbox"}},
+        headers=headers,
+    )
+    assert namespace_dry_run.status_code == 200, namespace_dry_run.text
+
+    missing_table = client.post(
+        "/api/v1/operations/dry-run",
+        json={"operation_id": "rewrite_data_files", "params": {"strategy": "binpack"}},
+        headers=headers,
+    )
+    assert missing_table.status_code == 422
 
     preview = client.get(
         f"/api/v1/tables/{risky_table['id']}/preview?resource=refs", headers=headers

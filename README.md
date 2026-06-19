@@ -50,11 +50,11 @@ make web-build
 
 ## Current Scope
 
-The current implementation includes built-in auth, roles, audit logging, connection records, mock Iceberg table indexing, health scoring, operation descriptors, dry-run records, approval requests, jobs, and a web console.
+The current implementation includes built-in auth, roles, audit logging, connection records, Iceberg table indexing, operation descriptors, dry-run records, approval requests, jobs, and a web console.
 
-It also includes the performance/layout/lifecycle automations: a layout & stats model, layout what-if simulation, clustering and materialized-view advisors, Parquet and write-distribution tuning, retention/TTL simulation and cleanup, Write-Audit-Publish pipelines, and declarative automation policies. See [docs/automations.md](docs/automations.md) for the endpoints and an explicit real-vs-mocked breakdown.
+It also includes the performance/layout/lifecycle automations: a layout & stats model, layout what-if simulation, clustering and materialized-view advisors, Parquet and write-distribution tuning, retention/TTL simulation and cleanup, Write-Audit-Publish pipelines, and declarative automation policies. See [docs/automations.md](docs/automations.md) for the endpoints and runtime status.
 
-Real Iceberg catalog and execution adapters are intentionally behind interfaces and are not enabled in this build; automation outputs are projections/heuristics over the indexed metadata, clearly labelled in each response.
+Live catalog and execution adapters are intentionally behind interfaces; automation outputs are projections/heuristics over indexed metadata unless a compatible runtime is configured.
 
 ### CORS
 

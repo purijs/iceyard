@@ -15,11 +15,13 @@ import {
   Wrench
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Badge, Button, formatBytes, Panel, toneForScore } from "@/components/ui";
+import { Badge, Button, formatBytes, Panel } from "@/components/ui";
+import type { ControlContext } from "@/app/page";
 import { api } from "@/lib/api";
 import type {
+  CatalogConnectionRead,
   EnvironmentRead,
   HealthRead,
   OperationDescriptor,
@@ -108,6 +110,8 @@ export function Tables({
   token,
   tables,
   environments,
+  connections,
+  context,
   selected,
   health,
   operations,
@@ -117,6 +121,8 @@ export function Tables({
   token: string;
   tables: TableRead[];
   environments: EnvironmentRead[];
+  connections: CatalogConnectionRead[];
+  context: ControlContext;
   selected: TableRead | null;
   health: HealthRead | null;
   operations: OperationDescriptor[];
@@ -124,8 +130,15 @@ export function Tables({
   onOpenOperation: (operationId: string, table: TableRead) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [healthFilter, setHealthFilter] = useState<"all" | "healthy" | "warning" | "critical">("all");
+  const [issueFilter, setIssueFilter] = useState<"all" | "open" | "small-files" | "snapshots" | "unowned">("all");
   const envById = useMemo(() => new Map(environments.map((env) => [env.id, env.name])), [environments]);
+  const connectionForTable = useCallback(
+    (table: TableRead) =>
+      context.catalogConnection?.environment_id === table.environment_id
+        ? context.catalogConnection
+        : connections.find((connection) => connection.environment_id === table.environment_id) ?? null,
+    [connections, context.catalogConnection]
+  );
   const namespaceCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const table of tables) {
@@ -136,8 +149,8 @@ export function Tables({
 
   const filtered = tables.filter((table) => {
     const matchesQuery = table.name.toLowerCase().includes(query.toLowerCase());
-    const tone = toneForScore(table.health_score);
-    return matchesQuery && (healthFilter === "all" || tone === healthFilter);
+    const issue = issueKind(table);
+    return matchesQuery && (issueFilter === "all" || (issueFilter === "open" ? issue !== "none" : issue === issueFilter));
   });
 
   if (selected) {
@@ -146,6 +159,8 @@ export function Tables({
         token={token}
         table={selected}
         envName={envById.get(selected.environment_id) ?? "env"}
+        connection={connectionForTable(selected)}
+        context={context}
         health={health}
         operations={operations}
         onBack={() => onSelect(null)}
@@ -180,19 +195,20 @@ export function Tables({
           <input
             className="w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
             placeholder="Filter tables..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <Segmented
-          value={healthFilter}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      <Segmented
+          value={issueFilter}
           items={[
             ["all", "All"],
-            ["healthy", "Healthy"],
-            ["warning", "Warning"],
-            ["critical", "Critical"]
+            ["open", "Open issues"],
+            ["small-files", "Small files"],
+            ["snapshots", "Snapshots"],
+            ["unowned", "Unowned"]
           ]}
-          onChange={(value) => setHealthFilter(value as typeof healthFilter)}
+          onChange={(value) => setIssueFilter(value as typeof issueFilter)}
         />
         <div className="ml-auto text-xs text-zinc-400">{filtered.length} tables</div>
       </div>
@@ -204,10 +220,10 @@ export function Tables({
               <tr>
                 <th className="px-4 py-2 font-medium">Table</th>
                 <th className="px-4 py-2 font-medium">Env</th>
+                <th className="px-4 py-2 font-medium">Catalog</th>
                 <th className="px-4 py-2 font-medium">Fmt</th>
-                <th className="px-4 py-2 font-medium">Health</th>
+                <th className="px-4 py-2 font-medium">Primary issue</th>
                 <th className="px-4 py-2 font-medium">Files</th>
-                <th className="px-4 py-2 font-medium">Small-file</th>
                 <th className="px-4 py-2 font-medium">Deletes</th>
                 <th className="px-4 py-2 font-medium">Snaps</th>
                 <th className="px-4 py-2 font-medium">Size</th>
@@ -224,16 +240,16 @@ export function Tables({
                 >
                   <td className="px-4 py-3 font-mono text-zinc-900">{table.name}</td>
                   <td className="px-4 py-3">
-                    <Badge>{envById.get(table.environment_id) ?? "env"}</Badge>
+                    <span className="font-mono text-xs text-zinc-500">{envById.get(table.environment_id) ?? "env"}</span>
                   </td>
+                  <td className="px-4 py-3 font-mono text-xs text-zinc-500">{connectionForTable(table)?.name ?? "catalog"}</td>
                   <td className="px-4 py-3">
                     <Badge>v{table.format_version}</Badge>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge tone={toneForScore(table.health_score)}>{table.health_score}</Badge>
+                    <IssueBadge table={table} />
                   </td>
                   <td className="px-4 py-3 font-mono">{table.metrics?.file_count.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-mono">{table.metrics?.small_file_ratio.toFixed(2)}</td>
                   <td className="px-4 py-3 font-mono">{table.metrics?.delete_file_count.toLocaleString()}</td>
                   <td className="px-4 py-3 font-mono">{table.metrics?.snapshot_count.toLocaleString()}</td>
                   <td className="px-4 py-3 font-mono">{formatBytes(table.metrics?.data_size_bytes ?? 0)}</td>
@@ -253,6 +269,8 @@ function TableDetail({
   token,
   table,
   envName,
+  connection,
+  context,
   health,
   operations,
   onBack,
@@ -261,6 +279,8 @@ function TableDetail({
   token: string;
   table: TableRead;
   envName: string;
+  connection: CatalogConnectionRead | null;
+  context: ControlContext;
   health: HealthRead | null;
   operations: OperationDescriptor[];
   onBack: () => void;
@@ -329,12 +349,12 @@ function TableDetail({
 
       <Panel>
         <div className="flex flex-wrap items-center gap-5">
-          <ScoreRing score={table.health_score} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-mono text-2xl text-zinc-950">{table.name}</h2>
-              <Badge>{envName}</Badge>
-              <Badge>v{table.format_version}</Badge>
+              <span className="text-sm text-zinc-400">
+                {envName} / {connection?.name ?? "catalog"} / {connection?.catalog_type ?? "catalog"} / v{table.format_version}
+              </span>
             </div>
             <div className="mt-1 truncate font-mono text-sm text-zinc-400">{table.location}</div>
           </div>
@@ -345,7 +365,7 @@ function TableDetail({
                 Preview
               </span>
             </Button>
-            <Button onClick={() => onOpenOperation("rewrite_data_files", table)} variant="primary">
+            <Button onClick={() => onOpenOperation("rewrite_data_files", table)} variant="primary" disabled={context.isAll}>
               <span className="inline-flex items-center gap-2">
                 <Wrench size={15} />
                 Run maintenance
@@ -383,23 +403,13 @@ function TableDetail({
               <KeyValue label="Sort order" value={formatSortOrder(currentSort)} />
             </dl>
           </Panel>
-          <Panel title="Health score breakdown" right={<Badge tone={toneForScore(health?.score ?? table.health_score)}>{health?.score ?? table.health_score} / 100</Badge>}>
-            <div className="space-y-4">
-              {(health?.dimensions ?? []).map((dimension) => (
-                <div key={dimension.name}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="text-zinc-600">
-                      {dimension.name} <span className="text-zinc-400">- {dimension.weight}%</span>
-                    </span>
-                    <span className={toneText(toneForScore(dimension.score))}>{dimension.score}</span>
-                  </div>
-                  <div className="h-1.5 rounded bg-zinc-100">
-                    <div className={`h-1.5 rounded ${toneBar(toneForScore(dimension.score))}`} style={{ width: `${dimension.score}%` }} />
-                  </div>
-                </div>
-              ))}
-              <p className="text-sm text-zinc-400">Composite, weighted. Any data-loss-risk condition caps the score into the red regardless of other dimensions.</p>
-            </div>
+          <Panel title="Runtime context">
+            <dl className="space-y-3 text-sm">
+              <KeyValue label="Environment" value={envName} />
+              <KeyValue label="Catalog connection" value={connection?.name ?? "unknown"} />
+              <KeyValue label="Catalog type" value={connection?.catalog_type ?? "unknown"} />
+              <KeyValue label="Operation mode" value={context.isAll ? <Badge tone="neutral">all environments</Badge> : <Badge tone="healthy">scoped</Badge>} />
+            </dl>
           </Panel>
           <div className="lg:col-span-2">
             <Panel title="Findings">
@@ -612,12 +622,13 @@ function TableDetail({
                 </div>
                 {card.recommended ? <Badge tone="warning">recommended</Badge> : card.gated ? <Lock size={16} className="text-zinc-400" /> : null}
               </div>
-              <Button onClick={() => onOpenOperation(card.id, table)} full disabled={!operationIds.has(card.id)}>
+              <Button onClick={() => onOpenOperation(card.id, table)} full disabled={context.isAll || !operationIds.has(card.id)}>
                 <span className="inline-flex items-center gap-2">
                   <Play size={15} />
                   Dry run
                 </span>
               </Button>
+              {context.isAll ? <div className="mt-2 text-xs text-zinc-400">Select a specific environment and catalog to run this.</div> : null}
             </Panel>
           ))}
         </div>
@@ -636,7 +647,7 @@ function TableDetail({
                 {resource}
               </button>
             ))}
-            <div className="ml-auto text-xs text-zinc-400">read-only - rate-limited - sensitive columns masked</div>
+            <div className="ml-auto text-xs text-zinc-400">preview only - rate-limited - sensitive columns masked</div>
           </div>
           {previewError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{previewError}</div> : null}
           <Panel title={<span className="font-mono">{preview?.query ?? "SELECT ..."}</span>} pad={false}>
@@ -707,21 +718,6 @@ function Segmented({
   );
 }
 
-function ScoreRing({ score }: { score: number }) {
-  const tone = toneForScore(score);
-  const color = tone === "healthy" ? "#059669" : tone === "warning" ? "#d97706" : "#dc2626";
-  return (
-    <div
-      className="grid h-20 w-20 shrink-0 place-items-center rounded-full"
-      style={{ background: `conic-gradient(${color} ${score * 3.6}deg, #f4f4f5 0deg)` }}
-    >
-      <div className="grid h-14 w-14 place-items-center rounded-full bg-white font-semibold" style={{ color }}>
-        {score}
-      </div>
-    </div>
-  );
-}
-
 function KeyValue({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -765,6 +761,29 @@ function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
 
 function namespaceOf(name: string) {
   return name.includes(".") ? name.split(".")[0] : "default";
+}
+
+function issueKind(table: TableRead): "none" | "small-files" | "snapshots" | "unowned" | "deletes" | "format" {
+  if (!table.owner) return "unowned";
+  if ((table.metrics?.snapshot_count ?? 0) > 80) return "snapshots";
+  if ((table.metrics?.small_file_ratio ?? 0) >= 0.4) return "small-files";
+  if ((table.metrics?.delete_file_count ?? 0) > 100) return "deletes";
+  if (table.format_version >= 3) return "format";
+  return "none";
+}
+
+function IssueBadge({ table }: { table: TableRead }) {
+  const issue = issueKind(table);
+  const labels = {
+    none: "none",
+    "small-files": `small files ${table.metrics?.small_file_ratio.toFixed(2)}`,
+    snapshots: `${table.metrics?.snapshot_count.toLocaleString()} snapshots`,
+    unowned: "owner missing",
+    deletes: `${table.metrics?.delete_file_count.toLocaleString()} deletes`,
+    format: "format review"
+  };
+  if (issue === "none") return <span className="text-xs text-zinc-400">none</span>;
+  return <Badge tone={issue === "unowned" || issue === "snapshots" ? "critical" : "warning"}>{labels[issue]}</Badge>;
 }
 
 function relativeDate(value: string | null | undefined) {
@@ -838,12 +857,4 @@ function retentionLabel(retention: Record<string, unknown>) {
   if (retention.max_ref_age) return `max-ref-age ${String(retention.max_ref_age)}`;
   if (retention.type) return String(retention.type);
   return "default";
-}
-
-function toneText(tone: "healthy" | "warning" | "critical") {
-  return tone === "healthy" ? "text-emerald-700" : tone === "warning" ? "text-amber-700" : "text-red-700";
-}
-
-function toneBar(tone: "healthy" | "warning" | "critical") {
-  return tone === "healthy" ? "bg-emerald-600" : tone === "warning" ? "bg-amber-600" : "bg-red-600";
 }

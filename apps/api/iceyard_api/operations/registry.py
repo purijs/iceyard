@@ -1335,7 +1335,7 @@ RAW_OPERATIONS: list[dict[str, object]] = [
             param(
                 "location",
                 default="",
-                placeholder="s3://dev-lakehouse/analytics/events",
+                placeholder="s3://bucket/namespace/table",
                 advanced=True,
             ),
             param("equal_authorities", default="", placeholder="host remap", advanced=True),

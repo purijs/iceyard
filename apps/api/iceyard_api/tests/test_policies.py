@@ -20,7 +20,6 @@ def _make_policy(name: str = "prod-events-clustering") -> dict[str, object]:
 
 
 def test_policy_crud_and_match(client: TestClient, token: str) -> None:
-    # ensure index is populated
     client.get("/api/v1/tables", headers=_auth(token))
 
     created = client.post("/api/v1/policies", json=_make_policy(), headers=_auth(token))
@@ -35,7 +34,7 @@ def test_policy_crud_and_match(client: TestClient, token: str) -> None:
     assert matched.status_code == 200, matched.text
     names = matched.json()["matched_table_names"]
     assert all(name.startswith("dev.analytics.") for name in names)
-    assert names  # analytics namespace exists in dev fixtures
+    assert names
 
     updated = client.patch(
         f"/api/v1/policies/{policy_id}",

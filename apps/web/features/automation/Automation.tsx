@@ -1,9 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarClock, Gauge, Sparkles, Trash2 } from "lucide-react";
+import {
+  BarChart3,
+  CalendarClock,
+  FileCog,
+  Gauge,
+  GitBranch,
+  Network,
+  RotateCcw,
+  ShieldCheck,
+  Sparkles,
+  Trash2
+} from "lucide-react";
 
 import { Badge, Button, Panel } from "@/components/ui";
+import type { ControlContext } from "@/app/page";
 import { api } from "@/lib/api";
 import type {
   AutomationPolicy,
@@ -25,15 +37,84 @@ type AdviceState = {
 
 const EMPTY_ADVICE: AdviceState = { clustering: null, parquet: null, distribution: null, cleanup: null };
 
+const AUTOMATION_BLOCKS = [
+  {
+    title: "Query acceleration",
+    safety: "REWRITE",
+    icon: Sparkles,
+    analyzes: "Clustering depth, predicate columns, join keys, file overlap, and projected scan reduction.",
+    trigger: "Threshold or off-peak schedule",
+    action: "Sort/z-order compaction, sort order updates, and optional materialized-view orchestration."
+  },
+  {
+    title: "Layout what-if",
+    safety: "READ",
+    icon: BarChart3,
+    analyzes: "Projected files scanned and bytes read under repartition, resort, z-order, or target-file-size changes.",
+    trigger: "Manual analysis or policy proposal",
+    action: "Recommendation only; apply routes through the normal dry-run flow."
+  },
+  {
+    title: "Parquet tuning",
+    safety: "METADATA / REWRITE",
+    icon: FileCog,
+    analyzes: "Codec, compression level, row-group size, page size, dictionary settings, and read/write tradeoffs.",
+    trigger: "Codec drift, table age, or storage growth",
+    action: "Set table properties for future writes or rewrite existing files."
+  },
+  {
+    title: "Write distribution",
+    safety: "METADATA",
+    icon: Network,
+    analyzes: "Small-file creation at ingestion time, partition fanout, sort order, and target file size.",
+    trigger: "Small-file rate exceeds threshold",
+    action: "Set write.distribution-mode and show matching ingestion-job settings."
+  },
+  {
+    title: "Write-audit-publish",
+    safety: "METADATA / READ",
+    icon: GitBranch,
+    analyzes: "Branch freshness, row counts, schema contracts, distribution drift, and custom SQL checks.",
+    trigger: "Branch event, API signal, or schedule",
+    action: "Create audit branch, validate staged snapshot, then fast-forward main or hold."
+  },
+  {
+    title: "Retention simulation",
+    safety: "READ -> DESTRUCTIVE",
+    icon: RotateCcw,
+    analyzes: "Expiring snapshots, reclaimable bytes, protected refs, and time-travel window loss.",
+    trigger: "Retention policy proposal",
+    action: "Preview only first; expire snapshots requires dry-run, restore point metadata, and gates."
+  },
+  {
+    title: "Default-value backfill",
+    safety: "MIGRATION",
+    icon: ShieldCheck,
+    analyzes: "Format v3 default values, old-reader compatibility, null coverage, and backfill blast radius.",
+    trigger: "Schema evolution policy",
+    action: "Plan compatibility gates, then backfill or hold until readers are upgraded."
+  },
+  {
+    title: "Cleanup old data",
+    safety: "DESTRUCTIVE",
+    icon: Trash2,
+    analyzes: "TTL selectors, partition alignment, delete percentage, affected snapshots, and guardrails.",
+    trigger: "Data-retention policy",
+    action: "Soft-delete, row-level delete, or partition-aligned cleanup through approved execution."
+  }
+];
+
 export function Automation({
   token,
   tables,
   operations,
+  context,
   onOpenOperation
 }: {
   token: string;
   tables: TableRead[];
   operations: OperationDescriptor[];
+  context: ControlContext;
   onOpenOperation: (operationId: string, table: TableRead) => void;
 }) {
   const operationById = new Map(operations.map((operation) => [operation.id, operation]));
@@ -49,9 +130,9 @@ export function Automation({
   const policiesLocked = edition ? edition.features.automation_policies === false : false;
 
   const loadPolicies = useCallback(() => {
-    if (policiesLocked) return;
+    if (!edition || policiesLocked) return;
     api.policies(token).then(setPolicies).catch((err: Error) => setError(err.message));
-  }, [token, policiesLocked]);
+  }, [edition, token, policiesLocked]);
 
   useEffect(() => {
     api.edition(token).then(setEdition).catch(() => setEdition(null));
@@ -98,12 +179,56 @@ export function Automation({
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
       ) : null}
 
-      {edition && (advisorLocked || policiesLocked) ? (
+      {context.isAll ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          You are on the <span className="font-mono">{edition.edition}</span> edition. Automation advisors and
-          policies are part of Iceyard Cloud / Enterprise — see iceyard.dev to upgrade.
+          Automation analysis is shown for the current summary only. Select an environment and catalog before running dry-runs from recommendations.
         </div>
       ) : null}
+
+      {edition && (advisorLocked || policiesLocked) ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          You are on the <span className="font-mono">{edition.edition}</span> edition. Live automation policies
+          and advisors are gated, but the supported analysis blocks are shown below.
+        </div>
+      ) : null}
+
+      <Panel
+        title="Automation blocks"
+        right={<span className="text-xs text-zinc-400">{AUTOMATION_BLOCKS.length} analysis patterns</span>}
+      >
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {AUTOMATION_BLOCKS.map((block) => {
+            const Icon = block.icon;
+            return (
+              <div key={block.title} className="rounded-lg border border-zinc-200 p-3">
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Icon size={16} className="text-zinc-500" />
+                    <div className="font-medium text-zinc-900">{block.title}</div>
+                  </div>
+                  <Badge tone={block.safety.includes("DESTRUCTIVE") ? "critical" : block.safety.includes("REWRITE") ? "warning" : "neutral"}>
+                    {block.safety}
+                  </Badge>
+                </div>
+                <dl className="space-y-2 text-xs">
+                  <div>
+                    <dt className="font-medium text-zinc-500">Analyzes</dt>
+                    <dd className="mt-0.5 text-zinc-600">{block.analyzes}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-zinc-500">Trigger</dt>
+                    <dd className="mt-0.5 text-zinc-600">{block.trigger}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-zinc-500">Action</dt>
+                    <dd className="mt-0.5 text-zinc-600">{block.action}</dd>
+                  </div>
+                </dl>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
 
       <Panel
         title="Declarative policies"
@@ -204,7 +329,7 @@ export function Automation({
                     {rec.projected_scan_reduction_pct}%
                   </p>
                   {selectedTable ? (
-                    <Button onClick={() => onOpenOperation(rec.apply_operation_id, selectedTable)}>Dry run</Button>
+                    <Button disabled={context.isAll} onClick={() => onOpenOperation(rec.apply_operation_id, selectedTable)}>Dry run</Button>
                   ) : null}
                 </div>
               ))}
@@ -221,7 +346,7 @@ export function Automation({
                 </p>
                 <p className="text-xs text-zinc-500">{advice.parquet.rationale}</p>
                 {selectedTable ? (
-                  <Button onClick={() => onOpenOperation(advice.parquet!.apply_operation_id, selectedTable)}>
+                  <Button disabled={context.isAll} onClick={() => onOpenOperation(advice.parquet!.apply_operation_id, selectedTable)}>
                     Apply settings
                   </Button>
                 ) : null}
@@ -236,7 +361,7 @@ export function Automation({
                 </p>
                 <p className="text-xs text-zinc-500">{advice.distribution.ingestion_hint}</p>
                 {selectedTable ? (
-                  <Button onClick={() => onOpenOperation(advice.distribution!.apply_operation_id, selectedTable)}>
+                  <Button disabled={context.isAll} onClick={() => onOpenOperation(advice.distribution!.apply_operation_id, selectedTable)}>
                     Set mode
                   </Button>
                 ) : null}
@@ -258,7 +383,7 @@ export function Automation({
                   <p className="text-xs text-amber-600">Recommend partitioning by the time column for cheap TTL.</p>
                 ) : null}
                 {selectedTable ? (
-                  <Button onClick={() => onOpenOperation(advice.cleanup!.apply_operation_id, selectedTable)}>
+                  <Button disabled={context.isAll} onClick={() => onOpenOperation(advice.cleanup!.apply_operation_id, selectedTable)}>
                     Plan cleanup
                   </Button>
                 ) : null}

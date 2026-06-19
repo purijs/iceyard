@@ -1,8 +1,10 @@
 import type {
   AuditEventRead,
   AutomationPolicy,
+  ApprovalRead,
   BootstrapResponse,
   CatalogConnectionRead,
+  ComputeBackendRead,
   CleanupPreview,
   ClusteringAdvice,
   DashboardRead,
@@ -14,6 +16,7 @@ import type {
   JobLogRead,
   JobRead,
   JobRunRead,
+  ObjectStoreConnectionRead,
   OperationCategoryRead,
   OperationDescriptor,
   OperationDryRunRead,
@@ -91,7 +94,16 @@ export const api = {
   updateUser: (token: string, userId: string, body: { role_ids?: string[]; is_active?: boolean }) =>
     request<UserDetailRead>(`/api/v1/users/${userId}`, { method: "PATCH", body: JSON.stringify(body) }, token),
   dashboard: (token: string) => request<DashboardRead>("/api/v1/dashboard", {}, token),
-  tables: (token: string) => request<TableRead[]>("/api/v1/tables", {}, token),
+  tables: (
+    token: string,
+    filters: { environmentId?: string | null; catalogConnectionId?: string | null } = {}
+  ) => {
+    const params = new URLSearchParams();
+    if (filters.environmentId) params.set("environment_id", filters.environmentId);
+    if (filters.catalogConnectionId) params.set("catalog_connection_id", filters.catalogConnectionId);
+    const query = params.toString();
+    return request<TableRead[]>(`/api/v1/tables${query ? `?${query}` : ""}`, {}, token);
+  },
   tableHealth: (token: string, tableId: string) => request<HealthRead>(`/api/v1/tables/${tableId}/health`, {}, token),
   tableSnapshots: (token: string, tableId: string) =>
     request<SnapshotRead[]>(`/api/v1/tables/${tableId}/snapshots`, {}, token),
@@ -107,8 +119,14 @@ export const api = {
     request<TablePreviewRead>(`/api/v1/tables/${tableId}/preview?resource=${encodeURIComponent(resource)}`, {}, token),
   environments: (token: string) => request<EnvironmentRead[]>("/api/v1/environments", {}, token),
   connections: (token: string) => request<CatalogConnectionRead[]>("/api/v1/connections/catalogs", {}, token),
+  objectStores: (token: string) =>
+    request<ObjectStoreConnectionRead[]>("/api/v1/connections/object-stores", {}, token),
+  computeBackends: (token: string) =>
+    request<ComputeBackendRead[]>("/api/v1/connections/compute-backends", {}, token),
   createEnvironment: (token: string, body: { name: string; kind: string; region?: string; posture?: Record<string, unknown> }) =>
     request<EnvironmentRead>("/api/v1/environments", { method: "POST", body: JSON.stringify(body) }, token),
+  deleteEnvironment: (token: string, environmentId: string) =>
+    request<void>(`/api/v1/environments/${environmentId}`, { method: "DELETE" }, token),
   createCatalogConnection: (
     token: string,
     body: {
@@ -121,6 +139,8 @@ export const api = {
       settings?: Record<string, unknown>;
     }
   ) => request<CatalogConnectionRead>("/api/v1/connections/catalogs", { method: "POST", body: JSON.stringify(body) }, token),
+  deleteCatalogConnection: (token: string, connectionId: string) =>
+    request<void>(`/api/v1/connections/catalogs/${connectionId}`, { method: "DELETE" }, token),
   createObjectStoreConnection: (
     token: string,
     body: {
@@ -134,6 +154,8 @@ export const api = {
     }
   ) =>
     request<{ id: string }>("/api/v1/connections/object-stores", { method: "POST", body: JSON.stringify(body) }, token),
+  deleteObjectStoreConnection: (token: string, storeId: string) =>
+    request<void>(`/api/v1/connections/object-stores/${storeId}`, { method: "DELETE" }, token),
   operations: (token: string) => request<OperationDescriptor[]>("/api/v1/operations/descriptors", {}, token),
   operationCategories: (token: string) =>
     request<OperationCategoryRead[]>("/api/v1/operations/descriptors/categories", {}, token),
@@ -145,7 +167,7 @@ export const api = {
     ),
   dryRun: (
     token: string,
-    body: { operation_id: string; table_id?: string; engine?: string; params: Record<string, unknown> }
+    body: { operation_id: string; table_id?: string; params: Record<string, unknown> }
   ) =>
     request<OperationDryRunRead>("/api/v1/operations/dry-run", { method: "POST", body: JSON.stringify(body) }, token),
   execute: (token: string, body: { dry_run_id: string; confirmation?: string; idempotency_key?: string }) =>
@@ -160,6 +182,13 @@ export const api = {
   cancelJob: (token: string, jobId: string) =>
     request<JobRead>(`/api/v1/jobs/${jobId}/cancel`, { method: "POST", body: JSON.stringify({}) }, token),
   audit: (token: string) => request<AuditEventRead[]>("/api/v1/audit", {}, token),
+  approvals: (token: string) => request<ApprovalRead[]>("/api/v1/approvals", {}, token),
+  decideApproval: (token: string, approvalId: string, body: { decision: "approved" | "rejected"; reason: string }) =>
+    request<ApprovalRead>(
+      `/api/v1/approvals/${approvalId}/decision`,
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    ),
   edition: (token: string) => request<EditionRead>("/api/v1/edition", {}, token),
   policies: (token: string) => request<AutomationPolicy[]>("/api/v1/policies", {}, token),
   createPolicy: (token: string, body: Record<string, unknown>) =>

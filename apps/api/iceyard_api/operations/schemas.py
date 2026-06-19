@@ -48,7 +48,7 @@ class OperationDescriptorSeedResult(BaseModel):
 class OperationDryRunRequest(BaseModel):
     operation_id: str
     table_id: str | None = None
-    engine: str = "embedded"
+    engine: str | None = None
     params: dict[str, object] = Field(default_factory=dict)
 
 

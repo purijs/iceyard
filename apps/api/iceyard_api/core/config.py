@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 60 * 12
     log_level: str = "INFO"
     secure_cookies: bool = False
-    enable_dev_seed: bool = True
     # Security
     auth_rate_limit_attempts: int = 10
     auth_rate_limit_window_seconds: int = 60

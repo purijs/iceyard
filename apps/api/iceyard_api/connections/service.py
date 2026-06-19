@@ -1,7 +1,7 @@
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from iceyard_api.core.time import utcnow
@@ -9,8 +9,18 @@ from iceyard_api.db.models import (
     CatalogConnection,
     ComputeBackend,
     Environment,
+    IcebergTable,
+    Namespace,
     ObjectStoreConnection,
+    OperationRequest,
+    PartitionSpec,
+    RestorePoint,
+    SchemaVersion,
     SecretReference,
+    Snapshot,
+    SortOrder,
+    TableMetrics,
+    TableRef,
 )
 
 
@@ -169,6 +179,7 @@ class ConnectionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Environment still has connections.",
             )
+        self._delete_table_index_for_environment(workspace_id, environment_id)
         self.session.delete(environment)
 
     def create_catalog_connection(
@@ -246,7 +257,111 @@ class ConnectionService:
 
     def delete_catalog_connection(self, workspace_id: str, connection_id: str) -> None:
         connection = self.get_catalog_connection(workspace_id, connection_id)
+        linked_store_id = (
+            connection.settings.get("object_store_connection_id")
+            if isinstance(connection.settings, dict)
+            else None
+        )
+        self._delete_table_index_for_connection(workspace_id, connection_id)
+        if isinstance(linked_store_id, str) and linked_store_id:
+            self._delete_unshared_object_store(workspace_id, linked_store_id, connection_id)
         self.session.delete(connection)
+
+    def _delete_unshared_object_store(
+        self, workspace_id: str, store_id: str, deleting_connection_id: str
+    ) -> None:
+        other_connections = self.session.scalars(
+            select(CatalogConnection).where(
+                CatalogConnection.workspace_id == workspace_id,
+                CatalogConnection.id != deleting_connection_id,
+            )
+        )
+        still_referenced = any(
+            isinstance(connection.settings, dict)
+            and connection.settings.get("object_store_connection_id") == store_id
+            for connection in other_connections
+        )
+        if still_referenced:
+            return
+        store = self.session.scalar(
+            select(ObjectStoreConnection).where(
+                ObjectStoreConnection.workspace_id == workspace_id,
+                ObjectStoreConnection.id == store_id,
+            )
+        )
+        if store:
+            self.session.delete(store)
+
+    def _delete_table_index_for_connection(
+        self, workspace_id: str, connection_id: str
+    ) -> None:
+        namespace_ids = list(
+            self.session.scalars(
+                select(Namespace.id).where(
+                    Namespace.workspace_id == workspace_id,
+                    Namespace.catalog_connection_id == connection_id,
+                )
+            )
+        )
+        if not namespace_ids:
+            return
+        self._delete_tables_for_namespaces(workspace_id, namespace_ids)
+        self.session.execute(delete(Namespace).where(Namespace.id.in_(namespace_ids)))
+
+    def _delete_table_index_for_environment(
+        self, workspace_id: str, environment_id: str
+    ) -> None:
+        table_rows = list(
+            self.session.execute(
+                select(IcebergTable.id, IcebergTable.namespace_id).where(
+                    IcebergTable.workspace_id == workspace_id,
+                    IcebergTable.environment_id == environment_id,
+                )
+            )
+        )
+        table_ids = [row.id for row in table_rows]
+        namespace_ids = list({row.namespace_id for row in table_rows})
+        self._delete_tables(table_ids)
+        if namespace_ids:
+            self.session.execute(
+                delete(Namespace).where(
+                    Namespace.workspace_id == workspace_id,
+                    Namespace.id.in_(namespace_ids),
+                )
+            )
+
+    def _delete_tables_for_namespaces(
+        self, workspace_id: str, namespace_ids: list[str]
+    ) -> None:
+        table_ids = list(
+            self.session.scalars(
+                select(IcebergTable.id).where(
+                    IcebergTable.workspace_id == workspace_id,
+                    IcebergTable.namespace_id.in_(namespace_ids),
+                )
+            )
+        )
+        self._delete_tables(table_ids)
+
+    def _delete_tables(self, table_ids: list[str]) -> None:
+        if not table_ids:
+            return
+        for model in (
+            TableMetrics,
+            Snapshot,
+            SchemaVersion,
+            PartitionSpec,
+            SortOrder,
+            TableRef,
+            RestorePoint,
+        ):
+            self.session.execute(delete(model).where(model.table_id.in_(table_ids)))
+        self.session.execute(
+            update(OperationRequest)
+            .where(OperationRequest.table_id.in_(table_ids))
+            .values(table_id=None)
+        )
+        self.session.execute(delete(IcebergTable).where(IcebergTable.id.in_(table_ids)))
 
     def test_catalog_connection(self, connection: CatalogConnection) -> dict[str, object]:
         connection.last_tested_at = utcnow()

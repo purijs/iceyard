@@ -114,10 +114,18 @@ class OperationService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Dry-run is not supported for this operation.",
             )
-        if payload.engine not in descriptor.supported_engines:
+        if self._requires_table(descriptor) and not payload.table_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="This operation requires a table.",
+            )
+        runtime_key = payload.engine or (
+            descriptor.supported_engines[0] if descriptor.supported_engines else "embedded"
+        )
+        if runtime_key not in descriptor.supported_engines:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Engine is not supported for this operation.",
+                detail="Requested runtime is not supported for this operation.",
             )
         table = self._get_table(actor.workspace_id, payload.table_id)
         table_name = table.name if table else "catalog.table"
@@ -264,7 +272,7 @@ class OperationService:
         run = JobRun(
             job_id=job.id,
             status="queued",
-            engine="mock",
+            engine="internal_worker",
             compiled_command=request.compiled_command,
             dry_run=False,
             pre_op_restore_ref=restore_ref,
@@ -278,7 +286,7 @@ class OperationService:
                 level="info",
                 message=(
                     "Job queued. The executor is a local placeholder "
-                    "until real engines are configured."
+                    "until compute backends are configured."
                 ),
             )
         )
@@ -310,6 +318,14 @@ class OperationService:
         if not table:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Table not found.")
         return table
+
+    def _requires_table(self, descriptor: OperationDescriptor) -> bool:
+        template_fields = {
+            field
+            for _, field, _, _ in Formatter().parse(descriptor.sql_template)
+            if field is not None
+        }
+        return bool({"table", "qualified_table"} & template_fields)
 
     def _params_with_defaults(
         self, descriptor: OperationDescriptor, params: dict[str, object]

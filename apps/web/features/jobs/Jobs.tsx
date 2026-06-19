@@ -1,49 +1,38 @@
 "use client";
 
-import { Play, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge, Button, Panel } from "@/components/ui";
+import type { ControlContext } from "@/app/page";
 import { api } from "@/lib/api";
-import type { JobLogRead, JobRead, JobRunRead, OperationDescriptor, TableRead } from "@/types/api";
+import type { JobLogRead, JobRead, JobRunRead } from "@/types/api";
+
+type JobTab = "active" | "queued" | "completed" | "failed" | "all";
 
 export function Jobs({
   token,
   jobs,
-  tables,
-  operations,
-  onOpenOperation,
+  context,
   onRefresh
 }: {
   token: string;
   jobs: JobRead[];
-  tables: TableRead[];
-  operations: OperationDescriptor[];
-  onOpenOperation: (operationId: string, table: TableRead) => void;
+  context: ControlContext;
   onRefresh: () => Promise<void>;
 }) {
-  const runnableOperations = useMemo(
-    () => operations.filter((operation) => operation.dry_run_supported && operation.safety_class !== "READ"),
-    [operations]
-  );
+  const [tab, setTab] = useState<JobTab>("active");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(jobs[0]?.id ?? null);
-  const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id ?? "");
-  const [selectedOperationId, setSelectedOperationId] = useState<string>(runnableOperations[0]?.id ?? "");
   const [runs, setRuns] = useState<JobRunRead[]>([]);
   const [logs, setLogs] = useState<JobLogRead[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const filteredJobs = useMemo(() => jobs.filter((job) => matchesTab(job, tab)), [jobs, tab]);
 
   useEffect(() => {
-    if (!selectedJobId && jobs[0]) setSelectedJobId(jobs[0].id);
-  }, [jobs, selectedJobId]);
-
-  useEffect(() => {
-    if (!selectedOperationId && runnableOperations[0]) setSelectedOperationId(runnableOperations[0].id);
-  }, [runnableOperations, selectedOperationId]);
-
-  useEffect(() => {
-    if (!selectedTableId && tables[0]) setSelectedTableId(tables[0].id);
-  }, [selectedTableId, tables]);
+    if (!selectedJobId || !jobs.some((job) => job.id === selectedJobId)) {
+      setSelectedJobId(filteredJobs[0]?.id ?? jobs[0]?.id ?? null);
+    }
+  }, [filteredJobs, jobs, selectedJobId]);
 
   useEffect(() => {
     if (!selectedJobId) {
@@ -69,16 +58,6 @@ export function Jobs({
 
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? null;
 
-  function startJob() {
-    const table = tables.find((item) => item.id === selectedTableId);
-    const operation = runnableOperations.find((item) => item.id === selectedOperationId);
-    if (!table || !operation) {
-      setMessage("Select a table and operation first.");
-      return;
-    }
-    onOpenOperation(operation.id, table);
-  }
-
   async function cancelJob() {
     if (!selectedJob) return;
     setMessage(null);
@@ -93,73 +72,65 @@ export function Jobs({
 
   return (
     <div className="space-y-4">
-      <Panel title="Start job">
-        <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
-          <label className="block">
-            <span className="mb-1 block text-xs text-zinc-500">Table</span>
-            <select className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" value={selectedTableId} onChange={(event) => setSelectedTableId(event.target.value)}>
-              {tables.map((table) => (
-                <option key={table.id} value={table.id}>
-                  {table.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-zinc-500">Operation</span>
-            <select className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" value={selectedOperationId} onChange={(event) => setSelectedOperationId(event.target.value)}>
-              {runnableOperations.map((operation) => (
-                <option key={operation.id} value={operation.id}>
-                  {operation.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex items-end">
-            <Button onClick={startJob} variant="primary">
-              <span className="inline-flex items-center gap-2">
-                <Play size={15} />
-                Configure & dry run
-              </span>
-            </Button>
-          </div>
+      <Panel
+        title="Jobs"
+        right={<span className="text-xs text-zinc-400">{context.label} · jobs are created from dry-run/execute flows</span>}
+        pad={false}
+      >
+        <div className="flex flex-wrap gap-2 border-b border-zinc-200 p-3">
+          {[
+            ["active", "Running"],
+            ["queued", "Queued"],
+            ["completed", "Completed"],
+            ["failed", "Failed"],
+            ["all", "All"]
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key as JobTab)}
+              className={`rounded-md px-3 py-1.5 text-sm ${tab === key ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      </Panel>
-
-      <Panel title="Jobs" pad={false}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
               <tr>
                 <th className="px-4 py-2 font-medium">Job</th>
-                <th className="px-4 py-2 font-medium">Type</th>
+                <th className="px-4 py-2 font-medium">Operation</th>
+                <th className="px-4 py-2 font-medium">Target</th>
+                <th className="px-4 py-2 font-medium">Runtime</th>
                 <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Started</th>
-                <th className="px-4 py-2 font-medium">Updated</th>
-                <th className="px-4 py-2 font-medium">Request</th>
+                <th className="px-4 py-2 font-medium">Created</th>
+                <th className="px-4 py-2 font-medium">Duration</th>
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => (
+              {filteredJobs.map((job) => (
                 <tr
                   key={job.id}
                   onClick={() => setSelectedJobId(job.id)}
                   className={`cursor-pointer border-b border-zinc-100 last:border-0 hover:bg-zinc-50 ${selectedJobId === job.id ? "bg-zinc-50" : ""}`}
                 >
                   <td className="px-4 py-3 font-mono text-xs text-zinc-800">{shortId(job.id)}</td>
-                  <td className="px-4 py-3 text-zinc-600">{job.kind}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-zinc-700">{job.operation_id ?? job.kind}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-zinc-600">{job.table_name ?? "catalog scope"}</td>
+                  <td className="px-4 py-3">
+                    <Badge tone={runtimeTone(job)}>{runtimeLabel(job)}</Badge>
+                  </td>
                   <td className="px-4 py-3">
                     <Badge tone={jobTone(job.status)}>{job.status}</Badge>
                   </td>
                   <td className="px-4 py-3 font-mono text-zinc-500">{formatTime(job.created_at)}</td>
                   <td className="px-4 py-3 font-mono text-zinc-500">{formatDuration(job.created_at, job.updated_at)}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-400">{job.operation_request_id ? shortId(job.operation_request_id) : "manual"}</td>
                 </tr>
               ))}
-              {jobs.length === 0 ? (
+              {!filteredJobs.length ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-zinc-400" colSpan={6}>
-                    No jobs yet. Start one from a table maintenance card or the selector above.
+                  <td className="px-4 py-8 text-center text-zinc-400" colSpan={7}>
+                    No jobs in this view. Jobs appear here after an operation is executed or an approval creates work.
                   </td>
                 </tr>
               ) : null}
@@ -184,15 +155,14 @@ export function Jobs({
         >
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Pipeline</div>
-              <div className="space-y-2 text-sm">
-                {["Plan rewrite", "Rewrite data files", "Rewrite manifests", "Commit snapshot", "Verify & release restore point"].map((step, index) => (
-                  <div key={step} className="flex items-center gap-2">
-                    <span className={`h-2.5 w-2.5 rounded-full ${index === 0 ? "bg-emerald-500" : index === 1 && selectedJob.status !== "queued" ? "bg-amber-500" : "border border-zinc-300 bg-white"}`} />
-                    <span className={index > 1 ? "text-zinc-400" : "text-zinc-700"}>{step}</span>
-                  </div>
-                ))}
-              </div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Job context</div>
+              <dl className="space-y-2 text-sm">
+                <KeyValue label="Operation" value={selectedJob.operation_id ?? selectedJob.kind} />
+                <KeyValue label="Target" value={selectedJob.table_name ?? "catalog scope"} />
+                <KeyValue label="Runtime" value={runs[0]?.engine ?? runtimeLabel(selectedJob)} />
+                <KeyValue label="Restore point" value={runs.find((run) => run.pre_op_restore_ref)?.pre_op_restore_ref ?? "none"} />
+                <KeyValue label="Correlation" value={selectedJob.correlation_id ?? "none"} />
+              </dl>
             </div>
             <div>
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Runs</div>
@@ -229,10 +199,39 @@ export function Jobs({
   );
 }
 
-function jobTone(status: string): "healthy" | "warning" | "critical" {
+function matchesTab(job: JobRead, tab: JobTab) {
+  if (tab === "all") return true;
+  if (tab === "active") return job.status === "running";
+  if (tab === "completed") return job.status === "succeeded" || job.status === "cancelled";
+  if (tab === "failed") return job.status === "failed" || job.status === "blocked";
+  return job.status === tab;
+}
+
+function jobTone(status: string): "healthy" | "warning" | "critical" | "neutral" {
   if (status === "failed" || status === "blocked") return "critical";
   if (status === "queued" || status === "running" || status === "pending") return "warning";
+  if (status === "cancelled") return "neutral";
   return "healthy";
+}
+
+function runtimeLabel(job: JobRead) {
+  if (!job.operation_id) return "Internal worker";
+  if (job.operation_id.includes("rewrite") || job.operation_id.includes("compact")) return "Requires compute backend";
+  if (job.catalog_connection_id) return "Native catalog";
+  return "Internal worker";
+}
+
+function runtimeTone(job: JobRead): "healthy" | "warning" | "neutral" {
+  return runtimeLabel(job) === "Requires compute backend" ? "warning" : "healthy";
+}
+
+function KeyValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="text-zinc-500">{label}</dt>
+      <dd className="max-w-[26rem] truncate font-mono text-zinc-900">{value}</dd>
+    </div>
+  );
 }
 
 function shortId(id: string) {

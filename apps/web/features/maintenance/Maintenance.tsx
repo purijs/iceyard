@@ -2,7 +2,8 @@
 
 import { Play, Wrench } from "lucide-react";
 
-import { Badge, Button, formatBytes, Panel, toneForScore } from "@/components/ui";
+import { Badge, Button, formatBytes, Panel } from "@/components/ui";
+import type { ControlContext } from "@/app/page";
 import type { OperationDescriptor, TableRead } from "@/types/api";
 
 const PLAN = [
@@ -16,27 +17,34 @@ const PLAN = [
 export function Maintenance({
   tables,
   operations,
+  context,
   onOpenOperation
 }: {
   tables: TableRead[];
   operations: OperationDescriptor[];
+  context: ControlContext;
   onOpenOperation: (operationId: string, table: TableRead) => void;
 }) {
   const operationIds = new Set(operations.map((operation) => operation.id));
-  const recommendations = tables
-    .filter((table) => table.health_score < 80)
-    .sort((a, b) => a.health_score - b.health_score);
+  const recommendations = tables.filter((table) => issueKind(table) !== "none").sort(issueSort);
+  const disabledReason = context.isAll ? "Select a specific environment and catalog to run maintenance." : null;
 
   return (
     <div className="space-y-4">
-      <Panel title="Maintenance plan" right={<span className="text-xs text-zinc-400">{recommendations.length} tables with open recommendations</span>} pad={false}>
+      {context.isAll ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          All environments are selected. Pick an environment and catalog connection before queueing maintenance.
+        </div>
+      ) : null}
+
+      <Panel title="Maintenance recommendations" right={<span className="text-xs text-zinc-400">{recommendations.length} open signals</span>} pad={false}>
         <table className="w-full min-w-[900px] text-sm">
           <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
             <tr>
               <th className="px-4 py-2 font-medium">Table</th>
               <th className="px-4 py-2 font-medium">Issue</th>
               <th className="px-4 py-2 font-medium">Size</th>
-              <th className="px-4 py-2 font-medium">Health</th>
+              <th className="px-4 py-2 font-medium">Recommended action</th>
               <th className="px-4 py-2 font-medium">Action</th>
             </tr>
           </thead>
@@ -44,13 +52,13 @@ export function Maintenance({
             {recommendations.map((table) => (
               <tr key={table.id} className="border-b border-zinc-100 last:border-0">
                 <td className="px-4 py-3 font-mono text-zinc-900">{table.name}</td>
-                <td className="px-4 py-3 text-zinc-600">{primaryIssue(table)}</td>
-                <td className="px-4 py-3 font-mono text-zinc-600">{formatBytes(table.metrics?.data_size_bytes ?? 0)}</td>
                 <td className="px-4 py-3">
-                  <Badge tone={toneForScore(table.health_score)}>{table.health_score}</Badge>
+                  <Badge tone={issueKind(table) === "snapshots" || issueKind(table) === "unowned" ? "critical" : "warning"}>{primaryIssue(table)}</Badge>
                 </td>
+                <td className="px-4 py-3 font-mono text-zinc-600">{formatBytes(table.metrics?.data_size_bytes ?? 0)}</td>
+                <td className="px-4 py-3 text-zinc-600">{operationDescription(bestOperation(table))}</td>
                 <td className="px-4 py-3">
-                  <Button onClick={() => onOpenOperation(bestOperation(table), table)}>
+                  <Button disabled={Boolean(disabledReason)} onClick={() => onOpenOperation(bestOperation(table), table)}>
                     <span className="inline-flex items-center gap-2">
                       <Wrench size={15} />
                       Plan
@@ -59,6 +67,13 @@ export function Maintenance({
                 </td>
               </tr>
             ))}
+            {!recommendations.length ? (
+              <tr>
+                <td className="px-4 py-8 text-center text-zinc-400" colSpan={5}>
+                  No maintenance recommendations in this context.
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </Panel>
@@ -75,7 +90,7 @@ export function Maintenance({
             </div>
             <Button
               full
-              disabled={!recommendations[0] || !operationIds.has(operationId)}
+              disabled={Boolean(disabledReason) || !recommendations[0] || !operationIds.has(operationId)}
               onClick={() => recommendations[0] && onOpenOperation(operationId, recommendations[0])}
             >
               <span className="inline-flex items-center gap-2">
@@ -83,6 +98,7 @@ export function Maintenance({
                 Dry run
               </span>
             </Button>
+            {disabledReason ? <div className="mt-2 text-xs text-zinc-400">{disabledReason}</div> : null}
           </Panel>
         ))}
       </div>
@@ -90,10 +106,21 @@ export function Maintenance({
   );
 }
 
+function issueKind(table: TableRead) {
+  if (!table.owner) return "unowned";
+  if ((table.metrics?.snapshot_count ?? 0) > 80) return "snapshots";
+  if ((table.metrics?.small_file_ratio ?? 0) >= 0.4) return "small-files";
+  if ((table.metrics?.delete_file_count ?? 0) > 100) return "deletes";
+  if (table.format_version >= 3) return "format";
+  return "none";
+}
+
 function primaryIssue(table: TableRead) {
+  if (!table.owner) return "owner missing";
+  if ((table.metrics?.snapshot_count ?? 0) > 80) return `${table.metrics?.snapshot_count.toLocaleString()} snapshots`;
   if ((table.metrics?.small_file_ratio ?? 0) >= 0.4) return `small-file ratio ${table.metrics?.small_file_ratio.toFixed(2)}`;
   if ((table.metrics?.delete_file_count ?? 0) > 100) return `${table.metrics?.delete_file_count.toLocaleString()} delete files`;
-  if ((table.metrics?.snapshot_count ?? 0) > 80) return `${table.metrics?.snapshot_count.toLocaleString()} snapshots`;
+  if (table.format_version >= 3) return "format compatibility";
   return "metadata hygiene";
 }
 
@@ -110,4 +137,9 @@ function operationDescription(operationId: string) {
   if (operationId === "rewrite_manifests") return "Consolidate manifest files for faster planning.";
   if (operationId === "expire_snapshots") return "Apply retention policy after protected-ref checks.";
   return "Delete unreferenced files after retention and path authority checks.";
+}
+
+function issueSort(left: TableRead, right: TableRead) {
+  const rank = { unowned: 0, snapshots: 1, "small-files": 2, deletes: 3, format: 4, none: 5 };
+  return rank[issueKind(left) as keyof typeof rank] - rank[issueKind(right) as keyof typeof rank];
 }
