@@ -43,6 +43,9 @@ class TableIndexRefreshResult(BaseModel):
     catalog_connection_id: str | None
     namespace_count: int
     table_count: int
+    discovered_table_count: int = 0
+    removed_table_count: int = 0
+    mode: str = "refresh"
     refreshed_at: datetime
 
 

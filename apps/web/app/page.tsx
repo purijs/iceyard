@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  RefreshCw,
   Search,
   Settings2,
   Shield,
@@ -87,7 +88,9 @@ export default function Home() {
   const [environmentId, setEnvironmentId] = useState<ContextId>("all");
   const [catalogConnectionId, setCatalogConnectionId] = useState<ContextId>("all");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
+  const [syncingTables, setSyncingTables] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -316,6 +319,25 @@ export default function Home() {
     await loadTables(token, environmentId, catalogConnectionId);
   };
 
+  const handleSyncTables = async () => {
+    if (!token || catalogConnectionId === "all") return;
+    setError(null);
+    setNotice(null);
+    setSyncingTables(true);
+    try {
+      const result = await api.refreshTableIndex(token, { catalog_connection_id: catalogConnectionId });
+      await load(token);
+      await loadTables(token, environmentId, catalogConnectionId);
+      setNotice(
+        `Synced ${result.table_count} tables (${result.discovered_table_count} new, ${result.removed_table_count} removed).`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sync tables.");
+    } finally {
+      setSyncingTables(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       if (token) await api.logout(token);
@@ -441,6 +463,13 @@ export default function Home() {
               onConnectionChange={setCatalogConnectionId}
             />
             <ContextBadge context={context} />
+            <Button
+              onClick={handleSyncTables}
+              disabled={syncingTables || catalogConnectionId === "all"}
+            >
+              <RefreshCw size={14} />
+              {syncingTables ? "Syncing" : "Sync tables"}
+            </Button>
             <div className="relative">
               <button
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-950 text-sm font-medium text-white"
@@ -508,6 +537,7 @@ export default function Home() {
         </header>
         <main className="flex-1 overflow-auto p-5">
           {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
+          {notice ? <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div> : null}
           {view === "overview" ? <Dashboard tables={tables} jobs={visibleJobs} context={context} /> : null}
           {view === "tables" ? (
             <Tables

@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, HardDrive, Lock, Pencil, Plus, Server, Trash2, X } from "lucide-react";
+import { Database, HardDrive, Lock, Pencil, Plus, RefreshCw, Server, Trash2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
@@ -13,6 +13,7 @@ import type {
   ConnectionTestResult,
   EnvironmentRead,
   ObjectStoreConnectionRead,
+  TableIndexRefreshResult,
   TableRead
 } from "@/types/api";
 
@@ -181,7 +182,9 @@ export function Connections({
   const [editingConnection, setEditingConnection] = useState<CatalogConnectionRead | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [testingIds, setTestingIds] = useState<Set<string>>(() => new Set());
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(() => new Set());
   const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
+  const [syncResults, setSyncResults] = useState<Record<string, TableIndexRefreshResult>>({});
   const tablesByEnvironment = useMemo(() => {
     const counts = new Map<string, number>();
     for (const table of tables) counts.set(table.environment_id, (counts.get(table.environment_id) ?? 0) + 1);
@@ -225,6 +228,24 @@ export function Connections({
       setActionError(err instanceof Error ? err.message : "Unable to test connection.");
     } finally {
       setTestingIds((current) => {
+        const next = new Set(current);
+        next.delete(connection.id);
+        return next;
+      });
+    }
+  }
+
+  async function syncCatalog(connection: CatalogConnectionRead) {
+    setActionError(null);
+    setSyncingIds((current) => new Set(current).add(connection.id));
+    try {
+      const result = await api.refreshTableIndex(token, { catalog_connection_id: connection.id });
+      setSyncResults((current) => ({ ...current, [connection.id]: result }));
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to sync tables.");
+    } finally {
+      setSyncingIds((current) => {
         const next = new Set(current);
         next.delete(connection.id);
         return next;
@@ -299,6 +320,10 @@ export function Connections({
                           <Button onClick={() => void testCatalog(connection)} disabled={testingIds.has(connection.id)}>
                             {testingIds.has(connection.id) ? "Testing..." : "Test"}
                           </Button>
+                          <Button onClick={() => void syncCatalog(connection)} disabled={syncingIds.has(connection.id) || !connection.is_enabled}>
+                            <RefreshCw size={14} />
+                            {syncingIds.has(connection.id) ? "Syncing..." : "Sync tables"}
+                          </Button>
                           <Button onClick={() => setEditingConnection(connection)}>
                             <Pencil size={14} /> Edit
                           </Button>
@@ -331,6 +356,7 @@ export function Connections({
                       </div>
                       <p className="mt-3 text-xs text-zinc-400">{CAPABILITY_PREVIEW[connection.catalog_type]?.note ?? "Capabilities are driven by the connection probe."}</p>
                       {testResults[connection.id] ? <ConnectionTestSummary result={testResults[connection.id]} /> : null}
+                      {syncResults[connection.id] ? <SyncSummary result={syncResults[connection.id]} /> : null}
                     </div>
                   ))}
                   {!envConnections.length ? <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-400">No catalog connections in this environment.</div> : null}
@@ -881,6 +907,20 @@ function ConnectionTestSummary({ result, compact = false }: { result: Connection
             <span className="max-w-[70%] text-right text-zinc-500">{component.message}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function SyncSummary({ result }: { result: TableIndexRefreshResult }) {
+  return (
+    <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium">Table sync complete</span>
+        <span className="font-mono text-xs">{result.table_count} indexed</span>
+      </div>
+      <div className="mt-1 text-xs text-emerald-700">
+        {result.discovered_table_count} discovered · {result.removed_table_count} removed · {result.namespace_count} namespaces
       </div>
     </div>
   );

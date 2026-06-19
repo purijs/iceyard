@@ -112,6 +112,16 @@ export type ComputeBackendRead = {
   created_at: string;
 };
 
+export type TableIndexRefreshResult = {
+  catalog_connection_id: string | null;
+  namespace_count: number;
+  table_count: number;
+  discovered_table_count: number;
+  removed_table_count: number;
+  mode: string;
+  refreshed_at: string;
+};
+
 export type EnvironmentRead = {
   id: string;
   name: string;

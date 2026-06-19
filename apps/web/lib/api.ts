@@ -28,6 +28,7 @@ import type {
   SnapshotRead,
   SortOrderRead,
   TablePreviewRead,
+  TableIndexRefreshResult,
   TableRead,
   TableRefRead,
   TokenResponse,
@@ -118,12 +119,50 @@ export const api = {
     request<SortOrderRead[]>(`/api/v1/tables/${tableId}/sort-orders`, {}, token),
   tablePreview: (token: string, tableId: string, resource = "rows") =>
     request<TablePreviewRead>(`/api/v1/tables/${tableId}/preview?resource=${encodeURIComponent(resource)}`, {}, token),
+  refreshTableIndex: (token: string, body: { catalog_connection_id?: string | null }) =>
+    request<TableIndexRefreshResult>(
+      "/api/v1/tables/index/refresh",
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    ),
   environments: (token: string) => request<EnvironmentRead[]>("/api/v1/environments", {}, token),
   connections: (token: string) => request<CatalogConnectionRead[]>("/api/v1/connections/catalogs", {}, token),
   objectStores: (token: string) =>
     request<ObjectStoreConnectionRead[]>("/api/v1/connections/object-stores", {}, token),
   computeBackends: (token: string) =>
     request<ComputeBackendRead[]>("/api/v1/connections/compute-backends", {}, token),
+  createComputeBackend: (
+    token: string,
+    body: {
+      environment_id: string;
+      name: string;
+      backend_type: ComputeBackendRead["backend_type"];
+      settings?: Record<string, unknown>;
+    }
+  ) =>
+    request<ComputeBackendRead>(
+      "/api/v1/connections/compute-backends",
+      { method: "POST", body: JSON.stringify(body) },
+      token
+    ),
+  updateComputeBackend: (
+    token: string,
+    backendId: string,
+    body: {
+      environment_id?: string;
+      name?: string;
+      backend_type?: ComputeBackendRead["backend_type"];
+      settings?: Record<string, unknown>;
+      is_enabled?: boolean;
+    }
+  ) =>
+    request<ComputeBackendRead>(
+      `/api/v1/connections/compute-backends/${backendId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      token
+    ),
+  deleteComputeBackend: (token: string, backendId: string) =>
+    request<void>(`/api/v1/connections/compute-backends/${backendId}`, { method: "DELETE" }, token),
   createEnvironment: (token: string, body: { name: string; kind: string; region?: string; posture?: Record<string, unknown> }) =>
     request<EnvironmentRead>("/api/v1/environments", { method: "POST", body: JSON.stringify(body) }, token),
   deleteEnvironment: (token: string, environmentId: string) =>
