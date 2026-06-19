@@ -14,6 +14,8 @@ services:
     build:
       context: .
       dockerfile: infra/api.Dockerfile
+    env_file:
+      - apps/api/.env
     environment:
       ICEYARD_ENVIRONMENT: local
       ICEYARD_DATABASE_URL: postgresql+psycopg://iceyard:iceyard@postgres:5432/iceyard
