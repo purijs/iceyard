@@ -60,6 +60,8 @@ const PREVIEW_RESOURCES = [
   "metadata_log"
 ];
 
+const METADATA_LOG_PAGE_SIZE = 10;
+
 const MAINTENANCE_CARDS = [
   {
     id: "rewrite_data_files",
@@ -307,6 +309,7 @@ function TableDetail({
   const [previewResource, setPreviewResource] = useState("rows");
   const [preview, setPreview] = useState<TablePreviewRead | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [metadataLogPage, setMetadataLogPage] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -336,6 +339,10 @@ function TableDetail({
   }, [table.id, token]);
 
   useEffect(() => {
+    setMetadataLogPage(0);
+  }, [table.id]);
+
+  useEffect(() => {
     if (tab !== "preview") return;
     let cancelled = false;
     setPreview(null);
@@ -354,10 +361,15 @@ function TableDetail({
   }, [previewResource, tab, table.id, token]);
 
   const latestSchema = detail.schemas.at(-1);
-  const schemaFields = asRecords(latestSchema?.table_schema?.fields);
+  const schemaFields = schemaFieldsFromSchema(latestSchema?.table_schema);
   const currentPartition = detail.partitions.find((partition) => partition.is_current) ?? detail.partitions[0];
   const currentSort = detail.sortOrders.find((sortOrder) => sortOrder.is_current) ?? detail.sortOrders[0];
   const operationIds = new Set(operations.map((operation) => operation.id));
+  const visibleProperties = visibleTableProperties(table.properties);
+  const metadataLogPages = Math.max(1, Math.ceil(detail.metadataLog.length / METADATA_LOG_PAGE_SIZE));
+  const currentMetadataLogPage = Math.min(metadataLogPage, metadataLogPages - 1);
+  const metadataLogStart = currentMetadataLogPage * METADATA_LOG_PAGE_SIZE;
+  const metadataLogRows = detail.metadataLog.slice(metadataLogStart, metadataLogStart + METADATA_LOG_PAGE_SIZE);
 
   return (
     <div className="space-y-4">
@@ -482,11 +494,11 @@ function TableDetail({
               </thead>
               <tbody>
                 {schemaFields.map((field, index) => (
-                  <tr key={String(field.name ?? index)} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-4 py-3 font-mono text-zinc-400">{String(field.id ?? field["field-id"] ?? index + 1)}</td>
-                    <td className="px-4 py-3 font-mono text-zinc-900">{String(field.name ?? "")}</td>
-                    <td className="px-4 py-3 font-mono text-zinc-600">{String(field.type ?? "")}</td>
-                    <td className="px-4 py-3 text-zinc-600">{field.required ? "yes" : "no"}</td>
+                  <tr key={`${schemaFieldId(field, index)}-${schemaFieldName(field, index)}`} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-3 font-mono text-zinc-400">{schemaFieldId(field, index)}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-900">{schemaFieldName(field, index)}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-600">{schemaFieldType(field)}</td>
+                    <td className="px-4 py-3 text-zinc-600">{schemaFieldRequired(field)}</td>
                     <td className="px-4 py-3 text-zinc-500">{schemaFieldNote(field)}</td>
                   </tr>
                 ))}
@@ -725,13 +737,15 @@ function TableDetail({
           <Panel title="Table properties" pad={false}>
             <table className="w-full text-sm">
               <tbody>
-                {Object.entries(table.properties ?? {}).map(([key, value]) => (
+                {visibleProperties.map(([key, value]) => (
                   <tr key={key} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-4 py-3 font-mono text-zinc-500">{key}</td>
-                    <td className="px-4 py-3 font-mono text-zinc-900">{displayValue(value)}</td>
+                    <td className="w-72 align-top px-4 py-3 font-mono text-zinc-500">{key}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-900">
+                      <PrettyPropertyValue propertyKey={key} value={value} />
+                    </td>
                   </tr>
                 ))}
-                {!Object.keys(table.properties ?? {}).length ? (
+                {!visibleProperties.length ? (
                   <tr>
                     <td className="px-4 py-8 text-center text-zinc-400" colSpan={2}>
                       No table properties were found in the synced metadata.
@@ -753,7 +767,17 @@ function TableDetail({
               </Button>
             </div>
           </Panel>
-          <Panel title="Metadata log" pad={false}>
+          <Panel
+            title="Metadata log"
+            right={
+              detail.metadataLog.length ? (
+                <span className="text-xs text-zinc-400">
+                  {metadataLogStart + 1}-{Math.min(metadataLogStart + METADATA_LOG_PAGE_SIZE, detail.metadataLog.length)} of {detail.metadataLog.length}
+                </span>
+              ) : null
+            }
+            pad={false}
+          >
             <table className="w-full text-sm">
               <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
                 <tr>
@@ -762,10 +786,10 @@ function TableDetail({
                 </tr>
               </thead>
               <tbody>
-                {detail.metadataLog.map((entry, index) => (
+                {metadataLogRows.map((entry, index) => (
                   <tr key={`${String(entry.metadata_file)}-${index}`} className="border-b border-zinc-100 last:border-0">
                     <td className="px-4 py-3 font-mono text-zinc-600">{metadataTimestamp(entry.timestamp_ms)}</td>
-                    <td className="px-4 py-3 font-mono text-zinc-900">{displayValue(entry.metadata_file)}</td>
+                    <td className="break-all px-4 py-3 font-mono text-zinc-900">{displayValue(entry.metadata_file)}</td>
                   </tr>
                 ))}
                 {!detail.metadataLog.length ? (
@@ -777,6 +801,25 @@ function TableDetail({
                 ) : null}
               </tbody>
             </table>
+            {detail.metadataLog.length > METADATA_LOG_PAGE_SIZE ? (
+              <div className="flex items-center justify-end gap-2 border-t border-zinc-200 p-3 text-xs text-zinc-500">
+                <Button
+                  onClick={() => setMetadataLogPage((page) => Math.max(0, page - 1))}
+                  disabled={currentMetadataLogPage === 0}
+                >
+                  Previous
+                </Button>
+                <span>
+                  Page {currentMetadataLogPage + 1} of {metadataLogPages}
+                </span>
+                <Button
+                  onClick={() => setMetadataLogPage((page) => Math.min(metadataLogPages - 1, page + 1))}
+                  disabled={currentMetadataLogPage >= metadataLogPages - 1}
+                >
+                  Next
+                </Button>
+              </div>
+            ) : null}
           </Panel>
         </div>
       ) : null}
@@ -821,15 +864,19 @@ function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
   if (!preview) {
     return <div className="p-8 text-center text-sm text-zinc-400">Loading preview...</div>;
   }
-  if (!preview.columns.length || !preview.rows.length) {
+  const columns = preview.columns.length ? preview.columns : inferColumns(preview.rows);
+  if (!preview.rows.length) {
     return <div className="p-8 text-center text-sm text-zinc-400">No rows are available for this preview resource.</div>;
+  }
+  if (!columns.length) {
+    return <div className="p-8 text-center text-sm text-zinc-400">Preview rows were returned without columns.</div>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-sm">
         <thead className="border-b border-zinc-200 text-left text-xs text-zinc-500">
           <tr>
-            {preview.columns.map((column) => (
+            {columns.map((column) => (
               <th key={column} className="px-4 py-2 font-mono font-medium">
                 {column}
               </th>
@@ -839,7 +886,7 @@ function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
         <tbody>
           {preview.rows.map((row, index) => (
             <tr key={index} className="border-b border-zinc-100 last:border-0">
-              {preview.columns.map((column) => (
+              {columns.map((column) => (
                 <td key={column} className="max-w-[420px] truncate px-4 py-2.5 font-mono text-zinc-700">
                   {displayValue(row[column])}
                 </td>
@@ -898,28 +945,124 @@ function asRecords(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [];
 }
 
+function schemaFieldsFromSchema(schema: unknown): Array<Record<string, unknown>> {
+  if (!isRecord(schema)) return [];
+  const nestedType = isRecord(schema.type) ? schema.type : null;
+  const nestedSchema = isRecord(schema.schema) ? schema.schema : null;
+  return asRecords(schema.fields ?? nestedType?.fields ?? nestedSchema?.fields);
+}
+
+function schemaFieldId(field: Record<string, unknown>, index: number) {
+  return String(field.id ?? field["field-id"] ?? field.field_id ?? index + 1);
+}
+
+function schemaFieldName(field: Record<string, unknown>, index: number) {
+  return String(field.name ?? field.names ?? `field_${index + 1}`);
+}
+
+function schemaFieldType(field: Record<string, unknown>) {
+  const type = field.type;
+  if (typeof type === "string") return type;
+  if (type === null || type === undefined) return "";
+  return displayValue(type);
+}
+
+function schemaFieldRequired(field: Record<string, unknown>) {
+  if (field.required === true || field.required === "true") return "yes";
+  if (field.optional === false || field.optional === "false") return "yes";
+  return "no";
+}
+
 function formatPartitionSpec(spec: PartitionSpecRead | undefined) {
   const fields = asRecords(spec?.spec.fields);
-  if (!fields.length) return "unpartitioned";
-  return fields
+  if (!fields.length) return "None";
+  const labels = fields
     .map((field) => {
       const transform = String(field.transform ?? "identity");
-      const source = String(field.source ?? field.column ?? "");
+      const source = firstString(
+        field.name,
+        field.source,
+        field.column,
+        field["source-name"],
+        field.source_name,
+        field["source-id"],
+        field.source_id
+      );
+      if (!source) return null;
       return transform === "identity" ? source : `${transform}(${source})`;
     })
-    .join(", ");
+    .filter((item): item is string => Boolean(item));
+  return labels.length ? labels.join(", ") : "None";
 }
 
 function formatSortOrder(sortOrder: SortOrderRead | undefined) {
   const fields = asRecords(sortOrder?.fields);
   if (!fields.length) return "unsorted";
-  return fields.map((field) => `${String(field.source ?? "")} ${String(field.direction ?? "asc").toUpperCase()}`).join(", ");
+  return fields
+    .map((field) => {
+      const source = firstString(field.name, field.source, field.column, field["source-id"], field.source_id);
+      if (!source) return null;
+      return `${source} ${String(field.direction ?? "asc").toUpperCase()}`;
+    })
+    .filter((item): item is string => Boolean(item))
+    .join(", ") || "unsorted";
 }
 
 function displayValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function PrettyPropertyValue({ propertyKey, value }: { propertyKey: string; value: unknown }) {
+  const pretty = prettyJsonValue(value);
+  if (pretty) {
+    return (
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-800">
+        {pretty}
+      </pre>
+    );
+  }
+  return <span className={propertyKey.includes("location") ? "break-all" : "break-words"}>{displayValue(value)}</span>;
+}
+
+function prettyJsonValue(value: unknown) {
+  if (typeof value === "object" && value !== null) return JSON.stringify(value, null, 2);
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || !["{", "["].includes(trimmed[0])) return null;
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+function visibleTableProperties(properties: Record<string, unknown> | null | undefined) {
+  const hidden = new Set(["metadata_parse_error", "parse_errors"]);
+  return Object.entries(properties ?? {}).filter(([key]) => !hidden.has(key));
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    return String(value);
+  }
+  return "";
+}
+
+function inferColumns(rows: Array<Record<string, unknown>>) {
+  const columns: string[] = [];
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      if (!columns.includes(key)) columns.push(key);
+    }
+  }
+  return columns;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function schemaFieldNote(field: Record<string, unknown>) {

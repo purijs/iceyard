@@ -198,12 +198,14 @@ class LiveIcebergReader:
         result.metrics = self._metrics(result.snapshots, result.manifests, current_files)
         result.table_updates["record_count"] = result.metrics["record_count"]
         result.partition_summaries = self._partition_summaries(current_files)
-        result.table_updates["properties"] = {
+        sync_properties = {
             **result.table_updates["properties"],
             "metadata_location": metadata_location,
             "sync_source": "live_metadata",
-            "parse_errors": result.errors,
         }
+        if result.errors:
+            sync_properties["parse_errors"] = result.errors
+        result.table_updates["properties"] = sync_properties
         return result
 
     def preview_rows(
@@ -318,13 +320,23 @@ class LiveIcebergReader:
         return None
 
     def _schemas(self, table: object, metadata: dict[str, Any]) -> list[dict[str, Any]]:
-        try:
-            schemas = list(table.schemas())
-        except Exception:
-            schemas = []
-        raw_schemas = [dict_value(schema) for schema in schemas] or [
+        raw_schemas = [
             schema for schema in list_value(metadata.get("schemas")) if isinstance(schema, dict)
         ]
+        if not raw_schemas:
+            legacy_schema = dict_value(metadata.get("schema"))
+            if legacy_schema:
+                raw_schemas = [legacy_schema]
+        if not raw_schemas:
+            try:
+                schemas = list(table.schemas())
+            except Exception:
+                schemas = []
+            raw_schemas = [
+                schema
+                for schema in (dict_value(schema) for schema in schemas)
+                if schema.get("fields")
+            ]
         return [
             {
                 "schema_id": int_value(schema.get("schema-id") or schema.get("schema_id"), index),

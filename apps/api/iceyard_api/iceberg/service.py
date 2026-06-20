@@ -702,10 +702,13 @@ class IcebergIndexService:
         table.default_sort_order_id = updates.get("default_sort_order_id")
         table.current_snapshot_id = updates.get("current_snapshot_id")
         table.record_count = updates.get("record_count")
-        table.properties = {
-            **(table.properties or {}),
-            **(updates.get("properties") or {}),
-        }
+        properties = dict(table.properties or {})
+        for stale_key in ("metadata_parse_error", "parse_errors"):
+            properties.pop(stale_key, None)
+        properties.update(updates.get("properties") or {})
+        if not properties.get("parse_errors"):
+            properties.pop("parse_errors", None)
+        table.properties = properties
         table.indexed_at = refreshed_at
 
         metrics = self.session.scalar(select(TableMetrics).where(TableMetrics.table_id == table.id))
@@ -1079,12 +1082,19 @@ class IcebergIndexService:
         latest_schema = schema[-1].schema if schema else {"fields": []}
         row_columns = self._schema_columns(latest_schema)
         if resource == "rows":
+            preview = self.preview_rows(table, limit=5)
+            preview_columns = preview.get("columns")
+            columns = (
+                [str(column) for column in preview_columns]
+                if isinstance(preview_columns, list) and preview_columns
+                else row_columns
+            )
             return {
                 "resource": "rows",
                 "rate_limited": True,
-                "query": f"SELECT * FROM {table_name} LIMIT 5",
-                "columns": row_columns,
-                "rows": self.preview_rows(table, limit=5)["rows"],
+                "query": str(preview.get("query") or f"SELECT * FROM {table_name} LIMIT 5"),
+                "columns": columns,
+                "rows": preview.get("rows") if isinstance(preview.get("rows"), list) else [],
                 "masked_columns": [],
             }
         resources = {
