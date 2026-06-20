@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
+from decimal import Decimal
 from enum import Enum
 from typing import Any
+from uuid import UUID
 
 from fastapi import HTTPException, status
 
@@ -29,13 +32,43 @@ def normalize_object_location(location: str) -> str:
     return location
 
 
+def ensure_pyarrow_type_compatibility() -> None:
+    try:
+        import pyarrow as pa
+        import pyarrow.types as pa_types
+    except ImportError:
+        return
+
+    fallback_checks = {
+        "is_string_view": lambda value: hasattr(pa, "string_view")
+        and value.equals(pa.string_view()),
+        "is_binary_view": lambda value: hasattr(pa, "binary_view")
+        and value.equals(pa.binary_view()),
+        "is_list_view": lambda value: hasattr(pa, "list_view")
+        and value.equals(pa.list_view(pa.null())),
+        "is_large_list_view": lambda value: hasattr(pa, "large_list_view")
+        and value.equals(pa.large_list_view(pa.null())),
+    }
+    for name, fallback in fallback_checks.items():
+        if not hasattr(pa_types, name):
+            setattr(pa_types, name, fallback)
+
+
 def to_plain(value: object) -> Any:
     if value is None or isinstance(value, str | int | float | bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            return str(value)
         return value
     if isinstance(value, bytes):
         return value.hex()
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, date | time):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, Enum):
         return value.name
     if hasattr(value, "model_dump"):
@@ -53,6 +86,10 @@ def to_plain(value: object) -> Any:
             if not key.startswith("__")
         }
     return str(value)
+
+
+def arrow_table_preview_rows(arrow_table: Any, *, limit: int) -> list[dict[str, Any]]:
+    return [to_plain(dict(row)) for row in arrow_table.to_pylist()[:limit]]
 
 
 def enum_name(value: object) -> str:
@@ -216,10 +253,11 @@ class LiveIcebergReader:
         selected_fields: tuple[str, ...] = ("*",),
         snapshot_id: int | None = None,
     ) -> dict[str, Any]:
+        ensure_pyarrow_type_compatibility()
         table = self._load_static_table(metadata_location)
         scan = table.scan(selected_fields=selected_fields, snapshot_id=snapshot_id, limit=limit)
         arrow_table = scan.to_arrow()
-        rows = [dict(row) for row in arrow_table.to_pylist()[:limit]]
+        rows = arrow_table_preview_rows(arrow_table, limit=limit)
         columns = list(arrow_table.column_names)
         identifier = getattr(table, "identifier", None) or getattr(table, "_identifier", None)
         if isinstance(identifier, tuple | list):
