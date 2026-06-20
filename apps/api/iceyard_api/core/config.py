@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     auth_rate_limit_attempts: int = 10
     auth_rate_limit_window_seconds: int = 60
     metadata_sync_workers: int = 4
+    metadata_sync_table_timeout_seconds: int = 90
+    metadata_sync_s3_connect_timeout_seconds: float = 5.0
+    metadata_sync_s3_request_timeout_seconds: float = 30.0
 
     # Origins on a private LAN (e.g. http://192.168.x.x:3000) are common when the
     # console is opened from another device during local development. In local mode

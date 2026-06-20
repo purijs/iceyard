@@ -355,7 +355,7 @@ export default function Home() {
     setSyncMenuOpen(true);
     setSyncTask({
       status: "running",
-      label: force ? "Force metadata sync" : "Metadata sync",
+      label: force ? "Force metadata reread" : "Metadata sync",
       message: "Reading catalog registrations and Iceberg metadata files...",
       progress: 12,
       result: null
@@ -371,7 +371,7 @@ export default function Home() {
         setError(`${summary}${firstError}`);
         setSyncTask({
           status: "failed",
-          label: force ? "Force metadata sync" : "Metadata sync",
+          label: force ? "Force metadata reread" : "Metadata sync",
           message: summary,
           progress: 100,
           result
@@ -380,7 +380,7 @@ export default function Home() {
         setNotice(summary);
         setSyncTask({
           status: "succeeded",
-          label: force ? "Force metadata sync" : "Metadata sync",
+          label: force ? "Force metadata reread" : "Metadata sync",
           message: summary,
           progress: 100,
           result
@@ -391,7 +391,7 @@ export default function Home() {
       setError(message);
       setSyncTask({
         status: "failed",
-        label: force ? "Force metadata sync" : "Metadata sync",
+        label: force ? "Force metadata reread" : "Metadata sync",
         message,
         progress: 100,
         result: null
@@ -781,8 +781,8 @@ function SyncDropdown({
               onClick={onForceSync}
             >
               <span>
-                <span className="block font-medium text-zinc-800">Force full metadata sync</span>
-                <span className="block text-xs text-zinc-400">Re-read metadata even when the pointer is unchanged</span>
+                <span className="block font-medium text-zinc-800">Force metadata reread</span>
+                <span className="block text-xs text-zinc-400">Ignore unchanged metadata pointers and refresh cached details</span>
               </span>
               <RefreshCw size={14} />
             </button>

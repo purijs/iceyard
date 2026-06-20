@@ -982,8 +982,8 @@ function ConnectionSyncMenu({
               onClick={onForceSync}
             >
               <span>
-                <span className="block font-medium text-zinc-800">Force full metadata sync</span>
-                <span className="block text-xs text-zinc-400">Re-read unchanged metadata pointers</span>
+                <span className="block font-medium text-zinc-800">Force metadata reread</span>
+                <span className="block text-xs text-zinc-400">Ignore unchanged metadata pointers and refresh cached details</span>
               </span>
               <RefreshCw size={14} />
             </button>

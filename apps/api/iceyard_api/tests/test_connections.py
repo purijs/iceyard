@@ -322,6 +322,8 @@ def test_path_style_s3_storage_does_not_force_virtual_addressing() -> None:
     assert properties["s3.endpoint"] == "https://s3.internal"
     assert properties["s3.access-key-id"] == "key"
     assert properties["s3.secret-access-key"] == "secret"
+    assert properties["s3.connect-timeout"] == "5.0"
+    assert properties["s3.request-timeout"] == "30.0"
     assert "s3.force-virtual-addressing" not in properties
 
 
@@ -352,3 +354,76 @@ def test_virtual_hosted_s3_storage_sets_virtual_addressing() -> None:
     ).iceberg_properties()
 
     assert properties["s3.force-virtual-addressing"] == "true"
+
+
+def test_metadata_parse_reads_manifest_entries_for_current_snapshot_only(monkeypatch) -> None:
+    catalog = CatalogConnection(
+        workspace_id="workspace",
+        environment_id="env",
+        name="catalog",
+        catalog_type="jdbc",
+        endpoint="jdbc:postgresql://database.internal:5432/iceberg_catalog",
+        settings={},
+        capabilities={},
+    )
+    reader = LiveIcebergReader(
+        catalog=catalog,
+        object_store=None,
+        catalog_secret={},
+        storage_secret={},
+    )
+
+    class FakeTable:
+        metadata = {
+            "format-version": 2,
+            "current-snapshot-id": 2,
+            "schemas": [],
+            "partition-specs": [],
+            "sort-orders": [],
+            "properties": {},
+        }
+
+        def current_snapshot(self):
+            return types.SimpleNamespace(snapshot_id=2)
+
+        def snapshots(self):
+            return [
+                {
+                    "snapshot-id": 1,
+                    "timestamp-ms": 1,
+                    "operation": "append",
+                    "manifest-list": "s3://bucket/table/metadata/old.avro",
+                },
+                {
+                    "snapshot-id": 2,
+                    "timestamp-ms": 2,
+                    "operation": "append",
+                    "manifest-list": "s3://bucket/table/metadata/current.avro",
+                },
+            ]
+
+        def schemas(self):
+            return []
+
+        def specs(self):
+            return []
+
+        def sort_orders(self):
+            return []
+
+        def refs(self):
+            return {}
+
+    manifest_reads: list[tuple[str, str]] = []
+    monkeypatch.setattr(reader, "_load_static_table", lambda _location: FakeTable())
+    monkeypatch.setattr(
+        reader,
+        "_manifest_files",
+        lambda _table, location, snapshot_id: manifest_reads.append((location, snapshot_id))
+        or [],
+    )
+
+    parsed = reader.parse_table("s3://bucket/table/metadata/current.metadata.json")
+
+    assert len(parsed.snapshots) == 2
+    assert manifest_reads == [("s3://bucket/table/metadata/current.avro", "2")]

@@ -1,6 +1,7 @@
 import os
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
@@ -284,36 +285,12 @@ class IcebergIndexService:
         )
         parse_results: list[tuple[IcebergTable, str, Any | None, str | None]] = []
         if parse_jobs:
-            if worker_count == 1:
-                for table, table_name, metadata_location in parse_jobs:
-                    try:
-                        parsed_metadata = reader.parse_table(metadata_location)
-                        parse_results.append((table, table_name, parsed_metadata, None))
-                    except Exception as exc:
-                        parse_results.append((table, table_name, None, str(exc)))
-            else:
-                def parse_table(metadata_location: str) -> Any:
-                    thread_reader = LiveIcebergReader(
-                        catalog=reader.catalog,
-                        object_store=reader.object_store,
-                        catalog_secret=reader.catalog_secret,
-                        storage_secret=reader.storage_secret,
-                    )
-                    return thread_reader.parse_table(metadata_location)
-
-                with ThreadPoolExecutor(
-                    max_workers=worker_count, thread_name_prefix="iceyard-metadata-sync"
-                ) as executor:
-                    futures = {
-                        executor.submit(parse_table, metadata_location): (table, table_name)
-                        for table, table_name, metadata_location in parse_jobs
-                    }
-                    for future in as_completed(futures):
-                        table, table_name = futures[future]
-                        try:
-                            parse_results.append((table, table_name, future.result(), None))
-                        except Exception as exc:
-                            parse_results.append((table, table_name, None, str(exc)))
+            parse_results = self._parse_metadata_jobs(
+                reader=reader,
+                jobs=parse_jobs,
+                worker_count=worker_count,
+                table_timeout_seconds=settings.metadata_sync_table_timeout_seconds,
+            )
 
         for table, table_name, parsed_metadata, parse_error in parse_results:
             if parse_error:
@@ -380,8 +357,74 @@ class IcebergIndexService:
                 "failed": failed,
                 "worker_count": worker_count,
                 "parse_job_count": len(parse_jobs),
+                "table_timeout_seconds": settings.metadata_sync_table_timeout_seconds,
+                "s3_connect_timeout_seconds": settings.metadata_sync_s3_connect_timeout_seconds,
+                "s3_request_timeout_seconds": settings.metadata_sync_s3_request_timeout_seconds,
+                "manifest_history": "current_snapshot",
             },
         }
+
+    def _parse_metadata_jobs(
+        self,
+        *,
+        reader: LiveIcebergReader,
+        jobs: list[tuple[IcebergTable, str, str]],
+        worker_count: int,
+        table_timeout_seconds: int,
+    ) -> list[tuple[IcebergTable, str, Any | None, str | None]]:
+        def parse_table(metadata_location: str) -> Any:
+            thread_reader = LiveIcebergReader(
+                catalog=reader.catalog,
+                object_store=reader.object_store,
+                catalog_secret=reader.catalog_secret,
+                storage_secret=reader.storage_secret,
+            )
+            return thread_reader.parse_table(metadata_location)
+
+        results: list[tuple[IcebergTable, str, Any | None, str | None]] = []
+        executor = ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="iceyard-metadata-sync"
+        )
+        futures = {
+            executor.submit(parse_table, metadata_location): (table, table_name)
+            for table, table_name, metadata_location in jobs
+        }
+        started_at = {future: time.monotonic() for future in futures}
+        pending = set(futures)
+        try:
+            while pending:
+                done, pending = wait(pending, timeout=1, return_when=FIRST_COMPLETED)
+                for future in done:
+                    table, table_name = futures[future]
+                    try:
+                        results.append((table, table_name, future.result(), None))
+                    except Exception as exc:
+                        results.append((table, table_name, None, str(exc)))
+
+                now = time.monotonic()
+                timed_out = [
+                    future
+                    for future in pending
+                    if now - started_at[future] >= table_timeout_seconds
+                ]
+                for future in timed_out:
+                    table, table_name = futures[future]
+                    future.cancel()
+                    pending.remove(future)
+                    results.append(
+                        (
+                            table,
+                            table_name,
+                            None,
+                            (
+                                "Timed out after "
+                                f"{table_timeout_seconds}s while reading Iceberg metadata."
+                            ),
+                        )
+                    )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+        return results
 
     def _read_postgres_jdbc_catalog_rows(
         self,

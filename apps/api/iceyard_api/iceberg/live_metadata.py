@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from iceyard_api.core.config import get_settings
 from iceyard_api.db.models import CatalogConnection, ObjectStoreConnection
 
 
@@ -116,7 +117,7 @@ class LiveIcebergReader:
         self.storage_secret = storage_secret
 
     def parse_table(
-        self, metadata_location: str, *, force_full_history: bool = True
+        self, metadata_location: str, *, force_full_history: bool = False
     ) -> ParsedIcebergMetadata:
         table = self._load_static_table(metadata_location)
         metadata = to_plain(table.metadata)
@@ -238,9 +239,11 @@ class LiveIcebergReader:
                 FSSPEC_FILE_IO,
                 PY_IO_IMPL,
                 S3_ACCESS_KEY_ID,
+                S3_CONNECT_TIMEOUT,
                 S3_ENDPOINT,
                 S3_FORCE_VIRTUAL_ADDRESSING,
                 S3_REGION,
+                S3_REQUEST_TIMEOUT,
                 S3_SECRET_ACCESS_KEY,
                 S3_SESSION_TOKEN,
             )
@@ -251,6 +254,7 @@ class LiveIcebergReader:
             ) from exc
 
         properties: dict[str, str] = {PY_IO_IMPL: FSSPEC_FILE_IO}
+        app_settings = get_settings()
         settings = self.object_store.settings if self.object_store else self.catalog.settings
         settings = settings if isinstance(settings, dict) else {}
         endpoint = self.object_store.endpoint if self.object_store else settings.get("endpoint")
@@ -259,6 +263,12 @@ class LiveIcebergReader:
             properties[S3_ENDPOINT] = endpoint
         if isinstance(region, str) and region:
             properties[S3_REGION] = region
+        properties[S3_CONNECT_TIMEOUT] = str(
+            app_settings.metadata_sync_s3_connect_timeout_seconds
+        )
+        properties[S3_REQUEST_TIMEOUT] = str(
+            app_settings.metadata_sync_s3_request_timeout_seconds
+        )
         if settings.get("access_style") == "virtual-hosted":
             properties[S3_FORCE_VIRTUAL_ADDRESSING] = "true"
         storage_auth = settings.get("storage_auth")
