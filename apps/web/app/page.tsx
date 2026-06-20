@@ -657,7 +657,6 @@ export default function Home() {
               objectStores={objectStores}
               computeBackends={computeBackends}
               tables={allTables}
-              context={context}
               onRefresh={handleRefresh}
             />
           ) : null}

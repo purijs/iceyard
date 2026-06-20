@@ -1,7 +1,7 @@
 "use client";
 
 import { Play, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge, Button, Panel } from "@/components/ui";
 import type { ControlContext } from "@/app/page";
@@ -41,12 +41,25 @@ export function Operations({
   const [message, setMessage] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  const openOperation = useCallback(
+    (operation: OperationDescriptor, tableId = selectedTable?.id ?? "") => {
+      setActive(operation);
+      setActiveTableId(operationRequiresTable(operation) ? tableId : "");
+      setParams(defaultParams(operation));
+      setIdempotencyKey("");
+      setDryRun(null);
+      setMessage(null);
+      setShowAdvanced(false);
+    },
+    [selectedTable?.id]
+  );
+
   useEffect(() => {
     if (!openOperationId) return;
     const operation = operations.find((item) => item.id === openOperationId);
     if (!operation) return;
     openOperation(operation, selectedTable?.id ?? "");
-  }, [openOperationId, operations, selectedTable?.id]);
+  }, [openOperation, openOperationId, operations, selectedTable?.id]);
 
   const filtered = useMemo(
     () =>
@@ -66,16 +79,6 @@ export function Operations({
   const advancedParams = active?.params.filter((param) => param.advanced && isVisibleParam(param, params)) ?? [];
   const runtime = active ? runtimeMeta(active, context) : null;
   const blockedReason = active ? disabledReason(active, context, effectiveTable) : null;
-
-  function openOperation(operation: OperationDescriptor, tableId = selectedTable?.id ?? "") {
-    setActive(operation);
-    setActiveTableId(operationRequiresTable(operation) ? tableId : "");
-    setParams(defaultParams(operation));
-    setIdempotencyKey("");
-    setDryRun(null);
-    setMessage(null);
-    setShowAdvanced(false);
-  }
 
   async function submitDryRun() {
     if (!active) return;

@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 import { Badge, Button, Panel } from "@/components/ui";
-import type { ControlContext } from "@/app/page";
 import { api } from "@/lib/api";
 import type {
   CatalogConnectionRead,
@@ -20,24 +19,20 @@ import type {
 const CATALOGS = [
   ["rest", "REST", "Polaris - Unity - Lakekeeper - generic"],
   ["jdbc", "JDBC", "PostgreSQL - MySQL"],
-  ["hive", "Hive Metastore", "Thrift"],
   ["glue", "AWS Glue", "IAM / Lake Formation"],
-  ["nessie", "Nessie", "Git-style branches"],
-  ["s3_tables", "S3 Tables", "AWS managed"],
-  ["hadoop", "Hadoop", "filesystem - dev only"]
+  ["s3_tables", "S3 Tables", "AWS managed"]
 ] as const;
 
 const STORES = [
   ["s3", "S3 / compatible"],
   ["gcs", "GCS"],
   ["adls", "Azure ADLS"],
-  ["hdfs", "HDFS"],
   ["local", "Local"]
 ] as const;
 
 const CATALOG_AUTHS = [
   ["none", "None / URI", "Embedded URI credentials or open dev catalog"],
-  ["basic", "Username + password", "JDBC, Hive, or basic REST auth"],
+  ["basic", "Username + password", "JDBC or basic REST auth"],
   ["bearer", "Bearer token", "REST catalog token"],
   ["oauth_client", "OAuth client", "client credentials flow"],
   ["aws_iam", "AWS IAM", "Glue, S3 Tables, Lake Formation"],
@@ -62,30 +57,15 @@ const CAPABILITY_PREVIEW: Record<string, { good: string[]; bad: string[]; note: 
     bad: ["credential vending", "server-side commit deconflicting", "multi-table commits"],
     note: "JDBC catalogs commit through the metadata DB directly. Data rewrite execution still needs an enabled runtime."
   },
-  hive: {
-    good: ["read / write", "schema evolution"],
-    bad: ["credential vending", "REST scan planning"],
-    note: "Hive Metastore catalogs work, but capability probing keeps REST-only features disabled."
-  },
   glue: {
     good: ["read / write", "Lake Formation integration"],
     bad: ["v3 create through REST", "credential vending"],
     note: "Glue support depends on account-level permissions and table format settings."
   },
-  nessie: {
-    good: ["catalog-level branching", "global time travel"],
-    bad: ["credential vending"],
-    note: "Nessie exposes catalog-wide references and branch workflows."
-  },
   s3_tables: {
     good: ["managed maintenance", "v3", "credential vending"],
     bad: [],
     note: "S3 Tables manages catalog and table maintenance in the provider service."
-  },
-  hadoop: {
-    good: ["filesystem pointers"],
-    bad: ["production coordination"],
-    note: "Hadoop catalogs are useful for local and dev workflows only."
   }
 };
 
@@ -166,7 +146,6 @@ export function Connections({
   objectStores,
   computeBackends,
   tables,
-  context,
   onRefresh
 }: {
   token: string;
@@ -175,7 +154,6 @@ export function Connections({
   objectStores: ObjectStoreConnectionRead[];
   computeBackends: ComputeBackendRead[];
   tables: TableRead[];
-  context: ControlContext;
   onRefresh: () => Promise<void>;
 }) {
   const [showWizard, setShowWizard] = useState(false);
@@ -627,7 +605,7 @@ function AddConnectionWizard({
             />
             <SetupStep
               title="2. Catalog metadata"
-              body="REST, JDBC, Glue, Hive, Nessie, S3 Tables, or Hadoop. JDBC points at the catalog database."
+              body="REST, JDBC, Glue, or S3 Tables. JDBC points at the catalog database."
             />
             <SetupStep
               title="3. Manifest storage"
@@ -707,7 +685,7 @@ function AddConnectionWizard({
               <div>
                 <div className="text-sm font-medium text-zinc-900">Catalog authentication</div>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Used for the REST/Hive/Glue/Nessie/S3 Tables endpoint or the JDBC metadata database. Storage credentials are configured separately.
+                  Used for the REST, Glue, or S3 Tables endpoint, or the JDBC metadata database. Storage credentials are configured separately.
                 </p>
               </div>
               <div className="grid gap-2 md:grid-cols-3">
@@ -1441,10 +1419,8 @@ function storageAuthNote(auth: StorageAuthType) {
 
 function catalogUriLabel(catalog: CatalogType) {
   if (catalog === "jdbc") return "JDBC catalog DB URI";
-  if (catalog === "hive") return "thrift uri";
   if (catalog === "glue") return "glue catalog id";
   if (catalog === "s3_tables") return "table bucket ARN";
-  if (catalog === "hadoop") return "warehouse path";
   return "catalog endpoint";
 }
 
@@ -1458,16 +1434,10 @@ function catalogHelp(catalog: CatalogType) {
   if (catalog === "glue") {
     return "Use the AWS account/catalog id and configure IAM or Lake Formation access through the auth section.";
   }
-  if (catalog === "hive") {
-    return "Use the Hive Metastore Thrift endpoint. Storage access is configured separately below.";
-  }
-  if (catalog === "nessie") {
-    return "Use the Nessie API endpoint. Branching is catalog-level, while table storage remains configured below.";
-  }
   if (catalog === "s3_tables") {
     return "Use the S3 Tables bucket ARN. The provider manages parts of the catalog and maintenance path.";
   }
-  return "Use the filesystem warehouse path for local or development catalogs.";
+  return "Use the catalog endpoint.";
 }
 
 function capabilityLabels(capabilities: Record<string, unknown>) {

@@ -191,6 +191,12 @@ export const api = {
       { method: "PATCH", body: JSON.stringify(body) },
       token
     ),
+  testComputeBackend: (token: string, backendId: string) =>
+    request<ConnectionTestResult>(
+      `/api/v1/connections/compute-backends/${backendId}/test`,
+      { method: "POST", body: JSON.stringify({}) },
+      token
+    ),
   deleteComputeBackend: (token: string, backendId: string) =>
     request<void>(`/api/v1/connections/compute-backends/${backendId}`, { method: "DELETE" }, token),
   createEnvironment: (token: string, body: { name: string; kind: string; region?: string; posture?: Record<string, unknown> }) =>

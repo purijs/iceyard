@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Database,
   Eye,
   GitBranch,
@@ -61,6 +63,8 @@ const PREVIEW_RESOURCES = [
 ];
 
 const METADATA_LOG_PAGE_SIZE = 10;
+const DETAIL_TABLE_PAGE_SIZE = 20;
+const PREVIEW_TABLE_PAGE_SIZE = 10;
 
 const MAINTENANCE_CARDS = [
   {
@@ -309,6 +313,11 @@ function TableDetail({
   const [previewResource, setPreviewResource] = useState("rows");
   const [preview, setPreview] = useState<TablePreviewRead | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [showPreviewQuery, setShowPreviewQuery] = useState(false);
+  const [schemaPage, setSchemaPage] = useState(0);
+  const [partitionPage, setPartitionPage] = useState(0);
+  const [snapshotPage, setSnapshotPage] = useState(0);
+  const [refsPage, setRefsPage] = useState(0);
   const [metadataLogPage, setMetadataLogPage] = useState(0);
 
   useEffect(() => {
@@ -340,6 +349,11 @@ function TableDetail({
 
   useEffect(() => {
     setMetadataLogPage(0);
+    setSchemaPage(0);
+    setPartitionPage(0);
+    setSnapshotPage(0);
+    setRefsPage(0);
+    setShowPreviewQuery(false);
   }, [table.id]);
 
   useEffect(() => {
@@ -366,6 +380,10 @@ function TableDetail({
   const currentSort = detail.sortOrders.find((sortOrder) => sortOrder.is_current) ?? detail.sortOrders[0];
   const operationIds = new Set(operations.map((operation) => operation.id));
   const visibleProperties = visibleTableProperties(table.properties);
+  const schemaPager = pageSlice(schemaFields, schemaPage, DETAIL_TABLE_PAGE_SIZE);
+  const partitionPager = pageSlice(detail.partitions, partitionPage, DETAIL_TABLE_PAGE_SIZE);
+  const snapshotPager = pageSlice(detail.snapshots, snapshotPage, DETAIL_TABLE_PAGE_SIZE);
+  const refsPager = pageSlice(detail.refs, refsPage, DETAIL_TABLE_PAGE_SIZE);
   const metadataLogPages = Math.max(1, Math.ceil(detail.metadataLog.length / METADATA_LOG_PAGE_SIZE));
   const currentMetadataLogPage = Math.min(metadataLogPage, metadataLogPages - 1);
   const metadataLogStart = currentMetadataLogPage * METADATA_LOG_PAGE_SIZE;
@@ -493,15 +511,18 @@ function TableDetail({
                 </tr>
               </thead>
               <tbody>
-                {schemaFields.map((field, index) => (
-                  <tr key={`${schemaFieldId(field, index)}-${schemaFieldName(field, index)}`} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-4 py-3 font-mono text-zinc-400">{schemaFieldId(field, index)}</td>
-                    <td className="px-4 py-3 font-mono text-zinc-900">{schemaFieldName(field, index)}</td>
+                {schemaPager.rows.map((field, index) => {
+                  const rowIndex = schemaPager.start + index;
+                  return (
+                  <tr key={`${schemaFieldId(field, rowIndex)}-${schemaFieldName(field, rowIndex)}`} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-3 font-mono text-zinc-400">{schemaFieldId(field, rowIndex)}</td>
+                    <td className="px-4 py-3 font-mono text-zinc-900">{schemaFieldName(field, rowIndex)}</td>
                     <td className="px-4 py-3 font-mono text-zinc-600">{schemaFieldType(field)}</td>
                     <td className="px-4 py-3 text-zinc-600">{schemaFieldRequired(field)}</td>
                     <td className="px-4 py-3 text-zinc-500">{schemaFieldNote(field)}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 {!schemaFields.length ? (
                   <tr>
                     <td className="px-4 py-8 text-center text-zinc-400" colSpan={5}>
@@ -512,6 +533,7 @@ function TableDetail({
               </tbody>
             </table>
           </div>
+          <TablePager page={schemaPager.page} pages={schemaPager.pages} total={schemaFields.length} onPageChange={setSchemaPage} />
           <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 p-4">
             <Button onClick={() => onOpenOperation("add_column", table)}>Add column</Button>
             <Button onClick={() => onOpenOperation("rename_column", table)}>Rename column</Button>
@@ -542,7 +564,7 @@ function TableDetail({
                 </tr>
               </thead>
               <tbody>
-                {detail.partitions.map((partition) => (
+                {partitionPager.rows.map((partition) => (
                   <tr key={partition.id} className="border-b border-zinc-100 last:border-0">
                     <td className="px-4 py-3 font-mono">{partition.spec_id}</td>
                     <td className="px-4 py-3">{partition.is_current ? <Badge tone="healthy">current</Badge> : null}</td>
@@ -558,6 +580,7 @@ function TableDetail({
                 ) : null}
               </tbody>
             </table>
+            <TablePager page={partitionPager.page} pages={partitionPager.pages} total={detail.partitions.length} onPageChange={setPartitionPage} />
             <div className="flex flex-wrap gap-2 border-t border-zinc-200 p-4">
               <Button onClick={() => onOpenOperation("add_time_partition", table)}>Add partition field</Button>
               <Button onClick={() => onOpenOperation("replace_partition_field", table)}>Change granularity</Button>
@@ -593,7 +616,7 @@ function TableDetail({
                 </tr>
               </thead>
               <tbody>
-                {detail.snapshots.map((snapshot) => (
+                {snapshotPager.rows.map((snapshot) => (
                   <tr key={snapshot.id} className="border-b border-zinc-100 last:border-0">
                     <td className="px-4 py-3 font-mono">
                       {snapshot.snapshot_id}
@@ -634,6 +657,7 @@ function TableDetail({
               </tbody>
             </table>
           </div>
+          <TablePager page={snapshotPager.page} pages={snapshotPager.pages} total={detail.snapshots.length} onPageChange={setSnapshotPage} />
         </Panel>
       ) : null}
 
@@ -650,7 +674,7 @@ function TableDetail({
                 </tr>
               </thead>
               <tbody>
-                {detail.refs.map((ref) => (
+                {refsPager.rows.map((ref) => (
                   <tr key={ref.id} className="border-b border-zinc-100 last:border-0">
                     <td className="px-4 py-3">
                       <Badge>{ref.ref_type === "branch" ? <GitBranch size={12} /> : <Tag size={12} />} {ref.ref_type}</Badge>
@@ -669,6 +693,7 @@ function TableDetail({
                 ) : null}
               </tbody>
             </table>
+            <TablePager page={refsPager.page} pages={refsPager.pages} total={detail.refs.length} onPageChange={setRefsPage} />
           </Panel>
           <Panel title="Write-audit-publish">
             <p className="text-sm text-zinc-600">Stage writes on an audit branch, validate, then fast-forward main.</p>
@@ -726,7 +751,20 @@ function TableDetail({
             <div className="ml-auto text-xs text-zinc-400">metadata resources are cached; row preview is bounded and read-only</div>
           </div>
           {previewError ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{previewError}</div> : null}
-          <Panel title={<span className="font-mono">{preview?.query ?? "SELECT ..."}</span>} pad={false}>
+          <Panel
+            title={<span className="font-mono">{previewResource}</span>}
+            right={
+              <Button onClick={() => setShowPreviewQuery((visible) => !visible)}>
+                {showPreviewQuery ? "Hide query" : "Show query"}
+              </Button>
+            }
+            pad={false}
+          >
+            {showPreviewQuery ? (
+              <pre className="max-h-52 overflow-auto whitespace-pre-wrap border-b border-zinc-200 bg-zinc-50 p-4 font-mono text-xs text-zinc-800">
+                {preview?.query ?? "SELECT ..."}
+              </pre>
+            ) : null}
             <PreviewTable preview={preview} />
           </Panel>
         </div>
@@ -861,10 +899,17 @@ function KeyValue({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
+  const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    setPage(0);
+  }, [preview?.resource, preview?.query]);
+
   if (!preview) {
     return <div className="p-8 text-center text-sm text-zinc-400">Loading preview...</div>;
   }
   const columns = preview.columns.length ? preview.columns : inferColumns(preview.rows);
+  const pager = pageSlice(preview.rows, page, PREVIEW_TABLE_PAGE_SIZE);
   if (!preview.rows.length) {
     return <div className="p-8 text-center text-sm text-zinc-400">No rows are available for this preview resource.</div>;
   }
@@ -884,7 +929,7 @@ function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
           </tr>
         </thead>
         <tbody>
-          {preview.rows.map((row, index) => (
+          {pager.rows.map((row, index) => (
             <tr key={index} className="border-b border-zinc-100 last:border-0">
               {columns.map((column) => (
                 <td key={column} className="max-w-[420px] truncate px-4 py-2.5 font-mono text-zinc-700">
@@ -895,6 +940,34 @@ function PreviewTable({ preview }: { preview: TablePreviewRead | null }) {
           ))}
         </tbody>
       </table>
+      <TablePager page={pager.page} pages={pager.pages} total={preview.rows.length} onPageChange={setPage} />
+    </div>
+  );
+}
+
+function TablePager({
+  page,
+  pages,
+  total,
+  onPageChange
+}: {
+  page: number;
+  pages: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= DETAIL_TABLE_PAGE_SIZE && pages <= 1) return null;
+  return (
+    <div className="flex items-center justify-end gap-2 border-t border-zinc-200 p-3 text-xs text-zinc-500">
+      <Button onClick={() => onPageChange(Math.max(0, page - 1))} disabled={page === 0}>
+        Previous
+      </Button>
+      <span>
+        Page {page + 1} of {pages} · {total} rows
+      </span>
+      <Button onClick={() => onPageChange(Math.min(pages - 1, page + 1))} disabled={page >= pages - 1}>
+        Next
+      </Button>
     </div>
   );
 }
@@ -1015,27 +1088,88 @@ function displayValue(value: unknown) {
 }
 
 function PrettyPropertyValue({ propertyKey, value }: { propertyKey: string; value: unknown }) {
-  const pretty = prettyJsonValue(value);
-  if (pretty) {
-    return (
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-800">
-        {pretty}
-      </pre>
-    );
+  const parsed = parseJsonValue(value);
+  if (parsed !== undefined) {
+    return <CollapsibleJson value={parsed} />;
   }
   return <span className={propertyKey.includes("location") ? "break-all" : "break-words"}>{displayValue(value)}</span>;
 }
 
-function prettyJsonValue(value: unknown) {
-  if (typeof value === "object" && value !== null) return JSON.stringify(value, null, 2);
-  if (typeof value !== "string") return null;
+function parseJsonValue(value: unknown) {
+  if (typeof value === "object" && value !== null) return value;
+  if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
-  if (!trimmed || !["{", "["].includes(trimmed[0])) return null;
+  if (!trimmed || !["{", "["].includes(trimmed[0])) return undefined;
   try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2);
+    return JSON.parse(trimmed) as unknown;
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+function CollapsibleJson({ value }: { value: unknown }) {
+  return (
+    <div className="max-h-96 overflow-auto rounded-md bg-zinc-50 p-3 font-mono text-xs text-zinc-800">
+      <JsonNode value={value} depth={0} />
+    </div>
+  );
+}
+
+function JsonNode({ label, value, depth }: { label?: string; value: unknown; depth: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const indent = { paddingLeft: `${depth * 14}px` };
+  if (Array.isArray(value)) {
+    const entries = showAll ? value : value.slice(0, 1);
+    return (
+      <div>
+        <button className="flex items-center gap-1 py-0.5 text-left hover:text-zinc-950" onClick={() => setExpanded((current) => !current)} style={indent}>
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {label ? <span className="text-zinc-500">{label}: </span> : null}
+          <span>[...]</span>
+          <span className="text-zinc-400">{value.length} items</span>
+        </button>
+        {expanded ? (
+          <div className="space-y-0.5">
+            {entries.map((item, index) => (
+              <JsonNode key={index} label={String(index)} value={item} depth={depth + 1} />
+            ))}
+            {value.length > 1 ? (
+              <button className="py-1 text-zinc-500 hover:text-zinc-950" style={{ paddingLeft: `${(depth + 1) * 14}px` }} onClick={() => setShowAll((current) => !current)}>
+                {showAll ? "Show first only" : `View all ${value.length}`}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  if (isRecord(value)) {
+    const entries = Object.entries(value);
+    return (
+      <div>
+        <button className="flex items-center gap-1 py-0.5 text-left hover:text-zinc-950" onClick={() => setExpanded((current) => !current)} style={indent}>
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {label ? <span className="text-zinc-500">{label}: </span> : null}
+          <span>{"{...}"}</span>
+          <span className="text-zinc-400">{entries.length} keys</span>
+        </button>
+        {expanded ? (
+          <div className="space-y-0.5">
+            {entries.map(([key, item]) => (
+              <JsonNode key={key} label={key} value={item} depth={depth + 1} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <div className="break-words py-0.5" style={indent}>
+      {label ? <span className="text-zinc-500">{label}: </span> : null}
+      <span>{displayValue(value)}</span>
+    </div>
+  );
 }
 
 function visibleTableProperties(properties: Record<string, unknown> | null | undefined) {
@@ -1063,6 +1197,18 @@ function inferColumns(rows: Array<Record<string, unknown>>) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function pageSlice<T>(rows: T[], page: number, pageSize: number) {
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, pages - 1);
+  const start = safePage * pageSize;
+  return {
+    rows: rows.slice(start, start + pageSize),
+    page: safePage,
+    pages,
+    start
+  };
 }
 
 function schemaFieldNote(field: Record<string, unknown>) {

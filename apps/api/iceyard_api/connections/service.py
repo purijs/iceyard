@@ -43,6 +43,7 @@ SECRET_AUTH_FIELDS = {
     "password",
     "bearer_token",
     "access_token",
+    "token",
     "client_secret",
     "secret_key",
 }
@@ -1159,12 +1160,18 @@ class ConnectionService:
     ) -> ComputeBackend:
         self._ensure_environment(workspace_id, environment_id)
         self._ensure_unique_name(ComputeBackend, workspace_id, name)
+        clean_settings, _ = self._sanitize_auth_settings(
+            workspace_id=workspace_id,
+            resource_name=name,
+            settings=settings,
+            section="auth",
+        )
         backend = ComputeBackend(
             workspace_id=workspace_id,
             environment_id=environment_id,
             name=name,
             backend_type=backend_type,
-            settings=settings,
+            settings=clean_settings,
         )
         self.session.add(backend)
         self.session.flush()
@@ -1188,6 +1195,135 @@ class ConnectionService:
             raise self._not_found("Compute backend")
         return backend
 
+    def test_compute_backend(self, backend: ComputeBackend) -> dict[str, object]:
+        settings = backend.settings if isinstance(backend.settings, dict) else {}
+        auth = settings.get("auth") if isinstance(settings.get("auth"), dict) else {}
+        components: list[dict[str, str]] = [
+            {
+                "name": "runtime type",
+                "status": "ok",
+                "message": f"{backend.backend_type} backend is configured.",
+            }
+        ]
+        backend_type = backend.backend_type
+        if backend_type == "spark":
+            spark = settings.get("spark") if isinstance(settings.get("spark"), dict) else {}
+            deploy_mode = str(spark.get("deploy_mode") or settings.get("deploy_mode") or "")
+            master_url = str(spark.get("master_url") or settings.get("endpoint") or "")
+            components.append(
+                {
+                    "name": "deploy mode",
+                    "status": "ok" if deploy_mode else "failed",
+                    "message": deploy_mode or "Spark deploy mode is required.",
+                }
+            )
+            components.append(
+                {
+                    "name": "master endpoint",
+                    "status": "ok" if deploy_mode == "local" or master_url else "failed",
+                    "message": master_url
+                    or (
+                        "local mode"
+                        if deploy_mode == "local"
+                        else "Spark master URL is required."
+                    ),
+                }
+            )
+            if deploy_mode.startswith("kubernetes"):
+                for keys, label in (
+                    (("container_image", "image"), "container image"),
+                    (("namespace",), "namespace"),
+                    (("service_account",), "service account"),
+                    (("upload_path",), "upload path"),
+                ):
+                    value = next((str(spark.get(key)) for key in keys if spark.get(key)), "")
+                    components.append(
+                        {
+                            "name": label,
+                            "status": "ok" if value else "failed",
+                            "message": value or f"Kubernetes Spark requires {label}.",
+                        }
+                    )
+        elif backend_type == "trino":
+            trino = settings.get("trino") if isinstance(settings.get("trino"), dict) else {}
+            endpoint = str(trino.get("endpoint") or settings.get("endpoint") or "")
+            catalog = str(trino.get("catalog") or "")
+            components.extend(
+                [
+                    {
+                        "name": "endpoint",
+                        "status": "ok" if endpoint else "failed",
+                        "message": endpoint or "Trino endpoint is required.",
+                    },
+                    {
+                        "name": "catalog",
+                        "status": "ok" if catalog else "failed",
+                        "message": catalog or "Trino catalog is required.",
+                    },
+                ]
+            )
+        elif backend_type in {"duckdb", "embedded"}:
+            components.append(
+                {
+                    "name": "execution mode",
+                    "status": "ok",
+                    "message": "Runs inside the API process for bounded local work.",
+                }
+            )
+        else:
+            endpoint = str(settings.get("endpoint") or "")
+            components.append(
+                {
+                    "name": "endpoint",
+                    "status": "ok" if endpoint else "warning",
+                    "message": endpoint or "No endpoint configured yet.",
+                }
+            )
+        auth_mode = str(auth.get("mode") or settings.get("auth_mode") or "runtime_identity")
+        auth_status = "ok"
+        auth_message = auth_mode
+        has_password = bool(
+            auth.get("password")
+            or auth.get("password_present")
+            or auth.get("secret_ref_id")
+        )
+        has_bearer_token = bool(
+            auth.get("bearer_token")
+            or auth.get("token")
+            or auth.get("bearer_token_present")
+            or auth.get("token_present")
+            or auth.get("secret_ref_id")
+        )
+        if auth_mode == "basic" and (not auth.get("username") or not has_password):
+            auth_status = "failed"
+            auth_message = "Username and password are required for basic auth."
+        elif auth_mode == "bearer" and not has_bearer_token:
+            auth_status = "failed"
+            auth_message = "Bearer token is required."
+        elif auth_mode == "secret_reference" and not auth.get("secret_reference"):
+            auth_status = "failed"
+            auth_message = "Secret reference is required."
+        components.append({"name": "auth", "status": auth_status, "message": auth_message})
+        failed = any(item["status"] == "failed" for item in components)
+        warning = any(item["status"] == "warning" for item in components)
+        return {
+            "connection_id": backend.id,
+            "status": "failed" if failed else "warning" if warning else "ok",
+            "message": (
+                "Compute backend test failed."
+                if failed
+                else "Compute backend configuration is valid."
+            ),
+            "capabilities": {
+                "can_execute_rewrites": backend_type in {"spark", "trino"} and not failed,
+                "can_run_local": backend_type in {"duckdb", "embedded"},
+                "can_submit_jobs": (
+                    backend_type in {"spark", "trino", "flink", "custom"} and not failed
+                ),
+            },
+            "components": components,
+        }
+
     def update_compute_backend(
         self, workspace_id: str, backend_id: str, values: dict[str, Any]
     ) -> ComputeBackend:
@@ -1202,7 +1338,16 @@ class ConnectionService:
             backend.name = name
         for field in ("backend_type", "settings", "is_enabled"):
             if field in values and values[field] is not None:
-                setattr(backend, field, values[field])
+                if field == "settings":
+                    settings, _ = self._sanitize_auth_settings(
+                        workspace_id=workspace_id,
+                        resource_name=backend.name,
+                        settings=values[field],
+                        section="auth",
+                    )
+                    backend.settings = settings
+                else:
+                    setattr(backend, field, values[field])
         self.session.flush()
         return backend
 

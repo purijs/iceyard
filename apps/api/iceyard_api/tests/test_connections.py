@@ -144,6 +144,17 @@ def test_connection_lifecycle(client: TestClient, token: str) -> None:
     )
     assert backend.status_code == 201, backend.text
     backend_id = backend.json()["id"]
+    backend_test = client.post(
+        f"/api/v1/connections/compute-backends/{backend_id}/test",
+        headers=headers,
+    )
+    assert backend_test.status_code == 200, backend_test.text
+    assert backend_test.json()["status"] == "ok"
+    assert {component["name"] for component in backend_test.json()["components"]} >= {
+        "runtime type",
+        "execution mode",
+        "auth",
+    }
 
     stores = client.get("/api/v1/connections/object-stores", headers=headers)
     assert stores.json()[0]["id"] == store_id

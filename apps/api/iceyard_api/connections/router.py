@@ -401,6 +401,27 @@ def get_compute_backend(
     return ConnectionService(session).get_compute_backend(current_user.workspace_id, backend_id)
 
 
+@router.post("/connections/compute-backends/{backend_id}/test", response_model=ConnectionTestResult)
+def test_compute_backend(
+    backend_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_permission("connections.manage")),
+) -> ConnectionTestResult:
+    service = ConnectionService(session)
+    backend = service.get_compute_backend(current_user.workspace_id, backend_id)
+    result = service.test_compute_backend(backend)
+    AuditService(session).record(
+        action="connection.compute.test",
+        resource_type="compute_backend",
+        resource_id=backend.id,
+        workspace_id=current_user.workspace_id,
+        actor_id=current_user.id,
+        after_state=result,
+    )
+    session.commit()
+    return ConnectionTestResult.model_validate(result)
+
+
 @router.patch("/connections/compute-backends/{backend_id}", response_model=ComputeBackendRead)
 def update_compute_backend(
     backend_id: str,
